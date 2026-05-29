@@ -46,6 +46,8 @@ CAM_FPS    = _env_int("PHOTOBOOTH_CAM_FPS", 30)
 PREVIEW_MIRROR = _env_bool("PHOTOBOOTH_PREVIEW_MIRROR", True)
 CAPTURE_ORIENTATION = os.getenv("PHOTOBOOTH_CAPTURE_ORIENTATION", "portrait").strip().lower()
 PORTRAIT_ROTATION = os.getenv("PHOTOBOOTH_PORTRAIT_ROTATION", "clockwise").strip().lower()
+DEFAULT_FILTER = os.getenv("PHOTOBOOTH_DEFAULT_FILTER", "bright").strip().lower()
+DEFAULT_FRAME_THEME = os.getenv("PHOTOBOOTH_DEFAULT_FRAME_THEME", "soft_pink").strip().lower()
 
 # ─── 촬영 흐름 ───────────────────────────────────────
 PHOTO_COUNT      = 4     # 한 세션에 찍을 장수

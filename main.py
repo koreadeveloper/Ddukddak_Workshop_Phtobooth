@@ -31,6 +31,7 @@ from camera import Camera, MockCamera
 import composer
 from qr_share import QRServer
 import printer
+from effects import FILTERS, apply_filter
 
 # ─── 로깅 설정 ──────────────────────────────────────
 logging.basicConfig(
@@ -136,6 +137,11 @@ class Button:
         self.radius     = radius
         self._hov       = False
         self._pressed   = False
+
+    def set_color(self, color):
+        self.color     = color
+        self.hover_col = tuple(min(c + 25, 255) for c in color)
+        self.press_col = tuple(max(c - 30, 0) for c in color)
 
     def update(self, mpos, pressed=False):
         self._hov     = self.rect.collidepoint(mpos)
@@ -288,6 +294,13 @@ class PhotoBooth:
             PORTRAIT_ROTATION if PORTRAIT_ROTATION in {"clockwise", "counterclockwise"}
             else "clockwise"
         )
+        self.selected_filter = (
+            DEFAULT_FILTER if DEFAULT_FILTER in FILTERS else "bright"
+        )
+        self.selected_frame_theme = (
+            DEFAULT_FRAME_THEME if DEFAULT_FRAME_THEME in composer.FRAME_THEMES
+            else "soft_pink"
+        )
         self._reset_session()
 
         # ── 상태 머신 ─────────────────────────────────
@@ -317,14 +330,28 @@ class PhotoBooth:
 
         # ── 버튼 (REVIEW 화면) ─────────────────────────
         self.btn_start = Button(
-            SCREEN_W // 2 - 220, 405, 440, 92, "촬영 시작", C_PINK, radius=28
+            1260, 850, 430, 92, "촬영 시작", C_PINK, radius=28
         )
         self.btn_portrait = Button(
-            SCREEN_W // 2 - 255, 525, 240, 66, "세로 촬영", C_BLUE, radius=22
+            930, 218, 220, 62, "세로 촬영", C_BLUE, radius=22
         )
         self.btn_landscape = Button(
-            SCREEN_W // 2 + 15, 525, 240, 66, "가로 촬영", (110, 110, 120), radius=22
+            1170, 218, 220, 62, "가로 촬영", (110, 110, 120), radius=22
         )
+        self.frame_buttons = []
+        for i, (theme_id, theme) in enumerate(composer.FRAME_THEMES.items()):
+            x = 930 + (i % 2) * 240
+            y = 390 + (i // 2) * 76
+            self.frame_buttons.append(
+                (theme_id, Button(x, y, 220, 58, theme["name"], (110, 110, 120), radius=18))
+            )
+        self.filter_buttons = []
+        for i, (filter_id, meta) in enumerate(FILTERS.items()):
+            x = 930 + (i % 3) * 170
+            y = 610 + (i // 3) * 72
+            self.filter_buttons.append(
+                (filter_id, Button(x, y, 150, 56, meta["name"], (110, 110, 120), radius=18))
+            )
 
         bw, bh, gap = 330, 80, 36
         total = 3 * bw + 2 * gap
@@ -360,6 +387,20 @@ class PhotoBooth:
             log.info(f"촬영 방향 변경: {self.capture_orientation} → {orientation}")
         self.capture_orientation = orientation
 
+    def _set_frame_theme(self, theme_id: str):
+        if theme_id not in composer.FRAME_THEMES:
+            return
+        if self.selected_frame_theme != theme_id:
+            log.info(f"프레임 변경: {self.selected_frame_theme} → {theme_id}")
+        self.selected_frame_theme = theme_id
+
+    def _set_filter(self, filter_id: str):
+        if filter_id not in FILTERS:
+            return
+        if self.selected_filter != filter_id:
+            log.info(f"필터 변경: {self.selected_filter} → {filter_id}")
+        self.selected_filter = filter_id
+
     def _oriented_frame(self, frame: np.ndarray) -> np.ndarray:
         """촬영/출력용 프레임 방향을 적용합니다."""
         if self.capture_orientation == "portrait":
@@ -371,8 +412,12 @@ class PhotoBooth:
             return cv2.rotate(frame, flag)
         return frame
 
-    def _display_frame(self, frame: np.ndarray) -> np.ndarray:
+    def _processed_frame(self, frame: np.ndarray) -> np.ndarray:
         frame = self._oriented_frame(frame)
+        return apply_filter(frame, self.selected_filter)
+
+    def _display_frame(self, frame: np.ndarray) -> np.ndarray:
+        frame = self._processed_frame(frame)
         if PREVIEW_MIRROR:
             frame = cv2.flip(frame, 1)
         return frame
@@ -408,7 +453,7 @@ class PhotoBooth:
         frame = self.camera.get_frame()
         if frame is None:
             frame = np.zeros((CAM_H, CAM_W, 3), dtype=np.uint8)
-        self.captured_bgr.append(self._oriented_frame(frame).copy())
+        self.captured_bgr.append(self._processed_frame(frame).copy())
         log.info(f"촬영 {len(self.captured_bgr)}/{PHOTO_COUNT}")
 
     def _start_compose(self):
@@ -426,10 +471,11 @@ class PhotoBooth:
 
                 # 풀 스트립 저장
                 self.strip_path = composer.compose_print_image(
-                    self.captured_bgr, self.session_id)
+                    self.captured_bgr, self.session_id, self.selected_frame_theme)
 
                 # 미리보기 Surface
-                preview = composer.make_preview_image(self.captured_bgr, 820)
+                preview = composer.make_preview_image(
+                    self.captured_bgr, 820, self.selected_frame_theme)
                 self.strip_surface = pil_to_surface(preview)
             except Exception as e:
                 log.error(f"합성 오류: {e}")
@@ -524,6 +570,10 @@ class PhotoBooth:
             self.btn_start.update(mpos, mpressed)
             self.btn_portrait.update(mpos, mpressed)
             self.btn_landscape.update(mpos, mpressed)
+            for _, btn in self.frame_buttons:
+                btn.update(mpos, mpressed)
+            for _, btn in self.filter_buttons:
+                btn.update(mpos, mpressed)
         elif self.state == St.REVIEW:
             for btn in (self.btn_print, self.btn_qr, self.btn_retake):
                 btn.update(mpos, mpressed)
@@ -538,6 +588,14 @@ class PhotoBooth:
             if self.btn_landscape.hit(pos):
                 self._set_capture_orientation("landscape")
                 return
+            for theme_id, btn in self.frame_buttons:
+                if btn.hit(pos):
+                    self._set_frame_theme(theme_id)
+                    return
+            for filter_id, btn in self.filter_buttons:
+                if btn.hit(pos):
+                    self._set_filter(filter_id)
+                    return
             self._begin_countdown()
 
         elif self.state == St.REVIEW:
@@ -565,6 +623,11 @@ class PhotoBooth:
     # ═══════════════════════════════════════════════
     #  IDLE 렌더링
     # ═══════════════════════════════════════════════
+    def _draw_selected_button_group(self, selected_id, buttons, active_color=C_BLUE):
+        for item_id, btn in buttons:
+            btn.set_color(active_color if item_id == selected_id else (110, 110, 120))
+            btn.draw(self.screen, self.f_small)
+
     def _draw_idle(self, dt):
         self.screen.fill(C_BG)
 
@@ -574,41 +637,55 @@ class PhotoBooth:
 
         # 메인 타이틀
         draw_text(self.screen, "오늘의 네컷", self.f_big, C_PINK,
-                  SCREEN_W // 2, 190, anchor="center",
+                  470, 88, anchor="center",
                   shadow=True, shadow_color=C_LPINK, shadow_off=4)
 
         draw_text(self.screen, "뚝딱 공방 포토부스", self.f_medium, C_GRAY,
-                  SCREEN_W // 2, 300, anchor="center")
+                  470, 152, anchor="center")
 
-        self.btn_start.draw(self.screen, self.f_large)
-        self.btn_portrait.color = C_BLUE if self.capture_orientation == "portrait" else (110, 110, 120)
-        self.btn_portrait.hover_col = tuple(min(c + 25, 255) for c in self.btn_portrait.color)
-        self.btn_portrait.press_col = tuple(max(c - 30, 0) for c in self.btn_portrait.color)
-        self.btn_landscape.color = C_BLUE if self.capture_orientation == "landscape" else (110, 110, 120)
-        self.btn_landscape.hover_col = tuple(min(c + 25, 255) for c in self.btn_landscape.color)
-        self.btn_landscape.press_col = tuple(max(c - 30, 0) for c in self.btn_landscape.color)
+        panel_x = 860
+        draw_text(self.screen, "촬영 방향", self.f_medium, C_DARK,
+                  panel_x, 176, anchor="topleft")
+        self.btn_portrait.set_color(
+            C_BLUE if self.capture_orientation == "portrait" else (110, 110, 120)
+        )
+        self.btn_landscape.set_color(
+            C_BLUE if self.capture_orientation == "landscape" else (110, 110, 120)
+        )
         self.btn_portrait.draw(self.screen, self.f_medium)
         self.btn_landscape.draw(self.screen, self.f_medium)
 
-        if int(time.time() * 1.6) % 2:
-            draw_text(self.screen, "터치 또는 클릭으로 시작",
-                      self.f_small, C_GRAY,
-                      SCREEN_W // 2, 620, anchor="center")
+        draw_text(self.screen, "프레임", self.f_medium, C_DARK,
+                  panel_x, 342, anchor="topleft")
+        self._draw_selected_button_group(
+            self.selected_frame_theme, self.frame_buttons, C_PINK)
+
+        draw_text(self.screen, "필터", self.f_medium, C_DARK,
+                  panel_x, 562, anchor="topleft")
+        self._draw_selected_button_group(
+            self.selected_filter, self.filter_buttons, C_BLUE)
+
+        theme_name = composer.FRAME_THEMES[self.selected_frame_theme]["name"]
+        filter_name = FILTERS[self.selected_filter]["name"]
+        draw_text(self.screen, f"{theme_name} 프레임 · {filter_name} 필터",
+                  self.f_small, C_GRAY, 1475, 794, anchor="center")
+
+        self.btn_start.draw(self.screen, self.f_large)
 
         # 카메라 소형 미리보기
         frame = self.camera.get_frame()
         if frame is not None:
             frame = self._display_frame(frame)
-            box_w, box_h = 360, 390
+            box_w, box_h = 700, 790
             prev = fit_bgr_to_surface(frame, box_w, box_h)
             pw, ph = prev.get_size()
-            px = SCREEN_W // 2 - pw // 2
-            py = 675
+            px = 110 + (box_w - pw) // 2
+            py = 220 + (box_h - ph) // 2
             draw_rrect(self.screen, C_LPINK,
                        (px - 6, py - 6, pw + 12, ph + 12), radius=14)
             self.screen.blit(prev, (px, py))
             draw_text(self.screen, "지금 모습이에요", self.f_small, C_GRAY,
-                      SCREEN_W // 2, py + ph + 14, anchor="center")
+                      110 + box_w // 2, 1018, anchor="center")
 
         # 하단 정보
         draw_text(self.screen, "어린이 포토부스  |  뚝딱 공방", self.f_tiny, C_LGRAY,

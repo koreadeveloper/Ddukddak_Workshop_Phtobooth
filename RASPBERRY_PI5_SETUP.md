@@ -148,6 +148,13 @@ cd ~/photobooth
 PHOTOBOOTH_PORTRAIT_ROTATION=counterclockwise
 ```
 
+기본 프레임/필터도 `.env`에서 바꿀 수 있습니다.
+
+```bash
+PHOTOBOOTH_DEFAULT_FRAME_THEME=soft_pink  # soft_pink/classic_white/studio_black/sky_blue
+PHOTOBOOTH_DEFAULT_FILTER=bright          # original/bright/warm/cool/mono
+```
+
 ## 6. 부팅 자동 실행
 
 `Exec` 경로는 실제 저장소 위치에 맞추세요.
