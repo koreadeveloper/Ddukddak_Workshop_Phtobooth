@@ -88,6 +88,12 @@ def check_camera() -> bool:
             _fail(f"카메라 프레임 읽기 실패: {source}")
             return False
         _ok(f"카메라 프레임 읽기 성공: {source}")
+        _ok(
+            "카메라 복구 설정: "
+            f"{cfg.CAM_STALE_SECS}초 이상 새 프레임 없음 또는 "
+            f"{cfg.CAM_MAX_READ_FAILURES}회 읽기 실패 시 "
+            f"{cfg.CAM_RECONNECT_SECS}초 간격 재연결"
+        )
         return True
     except Exception as e:
         _fail(f"카메라 점검 오류: {e}")

@@ -153,6 +153,9 @@ PHOTOBOOTH_PORTRAIT_ROTATION=counterclockwise
 ```bash
 PHOTOBOOTH_DEFAULT_FRAME_THEME=soft_pink  # soft_pink/classic_white/studio_black/sky_blue
 PHOTOBOOTH_DEFAULT_FILTER=bright          # original/bright/warm/cool/mono
+PHOTOBOOTH_CAM_STALE_SECS=3
+PHOTOBOOTH_CAM_RECONNECT_SECS=2
+PHOTOBOOTH_CAM_MAX_READ_FAILURES=30
 PHOTOBOOTH_SHOW_CROP_GUIDE=1
 PHOTOBOOTH_DEFAULT_PRINT_COPIES=1
 PHOTOBOOTH_MAX_PRINT_COPIES=3
@@ -169,6 +172,8 @@ PHOTOBOOTH_CLEANUP_INTERVAL_SECS=3600
 ```bash
 PHOTOBOOTH_SHOW_CROP_GUIDE=0
 ```
+
+웹캠 프레임이 끊기면 프로그램은 자동 재연결을 시도하고, 새 프레임이 들어오기 전에는 촬영을 완료하지 않습니다. 행사 중 USB 허브나 전원 문제로 화면이 멈추는 경우 `운영 점검`에서 카메라 재연결 횟수를 확인하세요.
 
 리뷰 화면에서는 인쇄 매수를 `1~PHOTOBOOTH_MAX_PRINT_COPIES` 범위에서 바꿀 수 있습니다. 손님이 리뷰 화면을 오래 방치하면 `PHOTOBOOTH_REVIEW_TIMEOUT`초 뒤 대기 화면으로 자동 복귀합니다. 시작 화면의 `운영 점검`에서는 카메라 프레임, CUPS 프린터 등록, QR 서버 주소, 저장공간을 확인할 수 있습니다.
 

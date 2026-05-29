@@ -557,6 +557,25 @@ class PhotoBooth:
         self.review_notice = text
         self.review_notice_until = time.time() + seconds
 
+    def _camera_health(self) -> dict:
+        if hasattr(self.camera, "health"):
+            return self.camera.health()
+        frame = self._camera_frame()
+        return {
+            "ok": frame is not None,
+            "source": "unknown",
+            "status": "프레임 확인" if frame is not None else "프레임 없음",
+            "age": 0.0 if frame is not None else float("inf"),
+            "failures": 0,
+            "reconnects": 0,
+        }
+
+    def _camera_frame(self):
+        try:
+            return self.camera.get_frame(max_age=CAM_STALE_SECS)
+        except TypeError:
+            return self.camera.get_frame()
+
     def _review_thumb_rects(self):
         tw, th = self._review_thumb_size()
         gap    = 16
@@ -578,11 +597,16 @@ class PhotoBooth:
         printer_ok, printer_text = printer.get_printer_status()
         total, used, free = shutil.disk_usage(BASE_DIR)
         photos_count = len(list(PHOTOS_DIR.glob("*.jpg"))) if PHOTOS_DIR.exists() else 0
-        frame = self.camera.get_frame()
-        camera_text = "카메라 프레임 정상" if frame is not None else "카메라 프레임 없음"
+        camera_health = self._camera_health()
+        age = camera_health["age"]
+        age_text = "새 프레임 없음" if age == float("inf") else f"최근 프레임 {age:.1f}초 전"
+        camera_text = (
+            f"{camera_health['status']} · {age_text} · "
+            f"재연결 {camera_health['reconnects']}회"
+        )
         qr_text = f"QR 서버: http://{get_local_ip()}:{QR_SERVER_PORT}"
         self.status_lines = [
-            ("카메라", camera_text, frame is not None),
+            ("카메라", camera_text, camera_health["ok"]),
             ("프린터", printer_text or PRINTER_NAME, printer_ok),
             ("QR", qr_text, self.qr_server.is_running),
             ("저장공간", f"여유 {free // (1024 ** 3)}GB / 전체 {total // (1024 ** 3)}GB", free > 1024 ** 3),
@@ -660,6 +684,11 @@ class PhotoBooth:
     def _draw_camera_preview_fullscreen(self, frame: np.ndarray):
         if frame is None:
             self.screen.fill((20, 20, 30))
+            health = self._camera_health()
+            draw_text(self.screen, "카메라 재연결 중", self.f_big, C_WHITE,
+                      SCREEN_W // 2, SCREEN_H // 2 - 30, anchor="center")
+            draw_text(self.screen, health["status"], self.f_medium, C_GRAY,
+                      SCREEN_W // 2, SCREEN_H // 2 + 54, anchor="center")
             return
         self.screen.fill((20, 20, 30))
         display_frame = self._display_frame(frame)
@@ -725,9 +754,10 @@ class PhotoBooth:
     #  촬영 & 합성
     # ─────────────────────────────────────────────────
     def _capture_photo(self):
-        frame = self.camera.get_frame()
+        frame = self._camera_frame()
         if frame is None:
-            frame = np.zeros((CAM_H, CAM_W, 3), dtype=np.uint8)
+            log.warning("카메라 프레임이 준비되지 않아 촬영을 다시 대기합니다")
+            return False
         raw = self._oriented_frame(frame).copy()
         processed = apply_filter(raw, self.selected_filter)
         if self.retake_index is not None:
@@ -746,6 +776,7 @@ class PhotoBooth:
             self.captured_raw_bgr.append(raw)
             self.captured_bgr.append(processed)
             log.info(f"촬영 {len(self.captured_bgr)}/{PHOTO_COUNT}")
+        return True
 
     def _start_compose(self):
         """백그라운드 스레드로 스트립 합성"""
@@ -1057,7 +1088,7 @@ class PhotoBooth:
         self.btn_start.draw(self.screen, self.f_large)
 
         # 카메라 소형 미리보기
-        frame = self.camera.get_frame()
+        frame = self._camera_frame()
         if frame is not None:
             frame = self._display_frame(frame)
             box_w, box_h = 700, 790
@@ -1093,7 +1124,11 @@ class PhotoBooth:
 
         # 촬영 타이밍
         if elapsed >= COUNTDOWN_SECS:
-            self._capture_photo()
+            if not self._capture_photo():
+                self.cd_val    = COUNTDOWN_SECS
+                self.cd_tick   = time.time()
+                self.last_beep = COUNTDOWN_SECS + 1
+                return
             if self.snd_shutter:
                 self.snd_shutter.play()
             self.flash_alpha = 255
@@ -1101,7 +1136,7 @@ class PhotoBooth:
 
     def _draw_countdown(self):
         # 카메라 프리뷰 (비율 유지)
-        frame = self.camera.get_frame()
+        frame = self._camera_frame()
         self._draw_camera_preview_fullscreen(frame)
 
         # 상단 반투명 바
@@ -1156,7 +1191,7 @@ class PhotoBooth:
     #  FLASH 렌더링
     # ═══════════════════════════════════════════════
     def _draw_flash(self):
-        frame = self.camera.get_frame()
+        frame = self._camera_frame()
         self._draw_camera_preview_fullscreen(frame)
 
         # 흰 플래시 페이드아웃

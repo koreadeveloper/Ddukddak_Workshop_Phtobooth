@@ -41,6 +41,9 @@ CAM_DEVICE = os.getenv("PHOTOBOOTH_CAM_DEVICE", "").strip()
 CAM_W      = _env_int("PHOTOBOOTH_CAM_W", 1280)
 CAM_H      = _env_int("PHOTOBOOTH_CAM_H", 720)
 CAM_FPS    = _env_int("PHOTOBOOTH_CAM_FPS", 30)
+CAM_STALE_SECS = _env_int("PHOTOBOOTH_CAM_STALE_SECS", 3)
+CAM_RECONNECT_SECS = _env_int("PHOTOBOOTH_CAM_RECONNECT_SECS", 2)
+CAM_MAX_READ_FAILURES = _env_int("PHOTOBOOTH_CAM_MAX_READ_FAILURES", 30)
 
 # 화면 미리보기는 거울처럼 보여 주되, 저장/인쇄 이미지는 실제 카메라 방향을 유지합니다.
 PREVIEW_MIRROR = _env_bool("PHOTOBOOTH_PREVIEW_MIRROR", True)
