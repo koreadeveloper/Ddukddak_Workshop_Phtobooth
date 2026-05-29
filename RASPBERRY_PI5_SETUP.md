@@ -99,24 +99,27 @@ lpinfo -v
 `usb://Canon/...` 형태의 URI가 보이면 프린터를 등록합니다. 아래 URI는 예시이므로 실제 출력값으로 바꾸세요.
 
 ```bash
-sudo lpadmin -p Canon_CP1500 \
+sudo lpadmin -p CP1500 \
   -E \
   -v "usb://Canon/CP1500?serial=XXXXXXXX&interface=1" \
   -m gutenprint.5.3://canonselphycp1500/expert
 
-lpstat -p Canon_CP1500
+lpstat -p CP1500
 ```
 
-등록된 이름이 `Canon_CP1500`이 아니면 `.env` 또는 실행 옵션으로 맞춥니다.
+이 프로그램의 기본 프린터 이름은 `CP1500`입니다. 이미 `lp -d CP1500 파일이름.jpg`로 출력에 성공했다면 프린터 등록은 끝난 상태입니다.
+
+기존 설치에서 `.env`에 예전 이름이 남아 있으면 아래처럼 바꿉니다.
 
 ```bash
-PHOTOBOOTH_PRINTER_NAME=실제_프린터_이름
+cd ~/photobooth
+sed -i 's/^PHOTOBOOTH_PRINTER_NAME=.*/PHOTOBOOTH_PRINTER_NAME=CP1500/' .env
 ```
 
 수동 테스트:
 
 ```bash
-lp -d Canon_CP1500 -o media=Postcard -o fit-to-page photos/테스트파일.jpg
+lp -d CP1500 -o media=Postcard -o fit-to-page photos/테스트파일.jpg
 ```
 
 ## 5. 실제 실행
@@ -135,7 +138,7 @@ cd ~/photobooth
 ./run.sh --capture-orientation portrait  # 세로 촬영/저장
 ./run.sh --capture-orientation landscape # 가로 촬영/저장
 ./run.sh --portrait-rotation counterclockwise # 세로 방향이 반대일 때
-./run.sh --printer Canon_CP1500 # CUPS 프린터 이름 지정
+./run.sh --printer CP1500       # CUPS 프린터 이름 지정
 ./run.sh --no-audio             # 오디오 장치 문제 시 무음 실행
 ./run.sh --hide-cursor          # 터치 전용 부스에서 커서 숨김
 ```

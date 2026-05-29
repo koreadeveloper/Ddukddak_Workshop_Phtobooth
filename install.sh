@@ -79,7 +79,7 @@ echo "    lpinfo -v                  # USB URI 확인"
 echo "    lpstat -p                  # 프린터 목록 확인"
 echo "    # 또는 브라우저에서 http://localhost:631 접속"
 echo ""
-echo "  프린터 이름 확인 후 config.py 의 PRINTER_NAME 을 수정하세요."
+echo "  프린터 이름이 CP1500이 아니면 .env의 PHOTOBOOTH_PRINTER_NAME을 수정하세요."
 echo ""
 
 ENV_TEMPLATE=".env.example"

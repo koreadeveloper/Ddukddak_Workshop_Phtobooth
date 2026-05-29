@@ -12,6 +12,7 @@ import sys
 
 import config as cfg
 import booth_stats
+import printer
 
 
 def _ok(message: str):
@@ -108,17 +109,16 @@ def check_printer() -> bool:
     else:
         _warn(f"CUPS 서비스 확인 필요: {output}")
 
-    code, output = _run(["lpstat", "-p", cfg.PRINTER_NAME])
-    if code == 0:
-        _ok(f"CUPS 프린터 등록 확인: {cfg.PRINTER_NAME}")
-        print(output)
+    ok, status = printer.get_printer_status()
+    if ok:
+        _ok(f"CUPS 프린터 사용 가능: {status}")
         _ok(
             "인쇄 작업 추적 설정: "
             f"{cfg.PRINT_JOB_WAIT_SECS}초까지 "
             f"{cfg.PRINT_JOB_POLL_SECS}초 간격으로 CUPS 대기열 확인"
         )
         return True
-    _warn(f"프린터 확인 실패: {cfg.PRINTER_NAME} ({output})")
+    _warn(f"프린터 확인 실패: {cfg.PRINTER_NAME} ({status})")
     return False
 
 

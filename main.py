@@ -1664,7 +1664,7 @@ def main():
                         choices=["clockwise", "counterclockwise"],
                         help="세로 촬영 시 카메라 회전 방향")
     parser.add_argument("--printer",
-                        help="CUPS 프린터 이름 예: Canon_CP1500")
+                        help="CUPS 프린터 이름 예: CP1500")
     parser.add_argument("--qr-port", type=int,
                         help="QR 다운로드 서버 포트")
     parser.add_argument("--no-audio", action="store_true",
