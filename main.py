@@ -1407,9 +1407,12 @@ class PhotoBooth:
             dots = "." * (int(elapsed * 2) % 4)
             draw_text(self.screen, f"인쇄 중{dots}", self.f_big, C_PINK,
                       SCREEN_W // 2, SCREEN_H // 2 - 60, anchor="center")
-            draw_text(self.screen, f"{self.print_copies}장 출력 요청 · 잠시만 기다려 주세요",
+            draw_text(self.screen, f"{self.print_copies}장 출력 요청 · CUPS 작업을 확인 중입니다",
                       self.f_medium, C_GRAY,
                       SCREEN_W // 2, SCREEN_H // 2 + 40, anchor="center")
+            draw_text(self.screen, "프린터에서 용지가 움직이기 시작할 때까지 전원을 끄지 마세요",
+                      self.f_small, C_GRAY,
+                      SCREEN_W // 2, SCREEN_H // 2 + 92, anchor="center")
 
             # 프린터 아이콘 바운스
             bounce_y = int(math.sin(elapsed * 3) * 8)

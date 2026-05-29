@@ -111,6 +111,11 @@ def check_printer() -> bool:
     if code == 0:
         _ok(f"CUPS 프린터 등록 확인: {cfg.PRINTER_NAME}")
         print(output)
+        _ok(
+            "인쇄 작업 추적 설정: "
+            f"{cfg.PRINT_JOB_WAIT_SECS}초까지 "
+            f"{cfg.PRINT_JOB_POLL_SECS}초 간격으로 CUPS 대기열 확인"
+        )
         return True
     _warn(f"프린터 확인 실패: {cfg.PRINTER_NAME} ({output})")
     return False

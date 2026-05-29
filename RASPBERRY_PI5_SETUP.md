@@ -162,6 +162,8 @@ PHOTOBOOTH_DEFAULT_PRINT_COPIES=1
 PHOTOBOOTH_MAX_PRINT_COPIES=3
 PHOTOBOOTH_REVIEW_TIMEOUT=120
 PHOTOBOOTH_PRINT_RESULT_TIMEOUT=5
+PHOTOBOOTH_PRINT_JOB_WAIT_SECS=120
+PHOTOBOOTH_PRINT_JOB_POLL_SECS=2
 PHOTOBOOTH_PHOTO_RETENTION_DAYS=14
 PHOTOBOOTH_MAX_STORED_PHOTOS=800
 PHOTOBOOTH_MIN_FREE_GB=1
@@ -185,6 +187,8 @@ PHOTOBOOTH_SHOW_CROP_GUIDE=0
 프린터가 CUPS에 등록되어 있지 않거나 비활성 상태이면 인쇄 버튼을 눌러도 출력 화면으로 넘어가지 않고 리뷰 화면에 안내가 표시됩니다. 프린터 문제를 해결한 뒤 다시 `인쇄하기`를 누르세요.
 
 인쇄가 실패하면 사진 세션을 버리지 않고 리뷰 화면으로 돌아옵니다. 프린터를 다시 확인한 뒤 `인쇄하기`를 다시 누르거나, 손님에게 QR 다운로드를 제공할 수 있습니다. 인쇄 성공 시에는 결과 화면을 `PHOTOBOOTH_PRINT_RESULT_TIMEOUT`초 보여 준 뒤 대기 화면으로 돌아갑니다.
+
+인쇄 요청 후에는 CUPS 작업 ID를 추적해 `PHOTOBOOTH_PRINT_JOB_WAIT_SECS`초까지 대기열을 확인합니다. CP1500 출력이 오래 걸려 타임아웃이 나더라도 중복 출력 방지를 위해 요청은 성공으로 처리합니다. 프린터가 중간에 비활성화되거나 대기열을 받을 수 없는 상태가 되면 실패로 처리되어 리뷰 화면으로 돌아옵니다.
 
 `photos/` 폴더는 장기 운영 중 자동 정리됩니다. 기본값은 14일 초과 사진 삭제, 최대 800장 보관, 저장공간 여유 1GB 미만이면 오래된 사진부터 삭제입니다. 행사가 끝난 뒤 원본을 보관해야 한다면 `photos/` 폴더를 먼저 백업하세요.
 
