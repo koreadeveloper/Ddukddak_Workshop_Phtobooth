@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import importlib
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -121,6 +122,21 @@ def check_qr_port() -> bool:
             return False
 
 
+def check_storage() -> bool:
+    total, _used, free = shutil.disk_usage(cfg.BASE_DIR)
+    free_gb = free / (1024 ** 3)
+    total_gb = total / (1024 ** 3)
+    message = (
+        f"저장공간 여유 {free_gb:.1f}GB / 전체 {total_gb:.1f}GB "
+        f"(최소 {cfg.MIN_FREE_GB}GB, 보관 {cfg.PHOTO_RETENTION_DAYS}일, 최대 {cfg.MAX_STORED_PHOTOS}장)"
+    )
+    if free_gb >= cfg.MIN_FREE_GB:
+        _ok(message)
+        return True
+    _warn(message)
+    return False
+
+
 def main() -> int:
     print("뚝딱 포토부스 Pi 점검")
     print(f"Python: {sys.version.split()[0]}")
@@ -130,6 +146,7 @@ def main() -> int:
         check_camera(),
         check_printer(),
         check_qr_port(),
+        check_storage(),
     ]
     if all(checks):
         _ok("전체 점검 통과")

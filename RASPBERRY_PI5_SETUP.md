@@ -156,6 +156,11 @@ PHOTOBOOTH_DEFAULT_FILTER=bright          # original/bright/warm/cool/mono
 PHOTOBOOTH_DEFAULT_PRINT_COPIES=1
 PHOTOBOOTH_MAX_PRINT_COPIES=3
 PHOTOBOOTH_REVIEW_TIMEOUT=120
+PHOTOBOOTH_PRINT_RESULT_TIMEOUT=5
+PHOTOBOOTH_PHOTO_RETENTION_DAYS=14
+PHOTOBOOTH_MAX_STORED_PHOTOS=800
+PHOTOBOOTH_MIN_FREE_GB=1
+PHOTOBOOTH_CLEANUP_INTERVAL_SECS=3600
 ```
 
 리뷰 화면에서는 인쇄 매수를 `1~PHOTOBOOTH_MAX_PRINT_COPIES` 범위에서 바꿀 수 있습니다. 손님이 리뷰 화면을 오래 방치하면 `PHOTOBOOTH_REVIEW_TIMEOUT`초 뒤 대기 화면으로 자동 복귀합니다. 시작 화면의 `운영 점검`에서는 카메라 프레임, CUPS 프린터 등록, QR 서버 주소, 저장공간을 확인할 수 있습니다.
@@ -163,6 +168,10 @@ PHOTOBOOTH_REVIEW_TIMEOUT=120
 리뷰 화면의 촬영 컷 썸네일을 누르면 해당 컷이 선택됩니다. `선택 컷 다시 찍기`를 누르면 4장을 전부 다시 찍지 않고 선택한 컷만 새로 촬영한 뒤 최종 출력물을 다시 합성합니다. `전체 다시 찍기`는 현재 세션을 버리고 1번 컷부터 다시 시작합니다.
 
 프린터가 CUPS에 등록되어 있지 않거나 비활성 상태이면 인쇄 버튼을 눌러도 출력 화면으로 넘어가지 않고 리뷰 화면에 안내가 표시됩니다. 프린터 문제를 해결한 뒤 다시 `인쇄하기`를 누르세요.
+
+인쇄가 실패하면 사진 세션을 버리지 않고 리뷰 화면으로 돌아옵니다. 프린터를 다시 확인한 뒤 `인쇄하기`를 다시 누르거나, 손님에게 QR 다운로드를 제공할 수 있습니다. 인쇄 성공 시에는 결과 화면을 `PHOTOBOOTH_PRINT_RESULT_TIMEOUT`초 보여 준 뒤 대기 화면으로 돌아갑니다.
+
+`photos/` 폴더는 장기 운영 중 자동 정리됩니다. 기본값은 14일 초과 사진 삭제, 최대 800장 보관, 저장공간 여유 1GB 미만이면 오래된 사진부터 삭제입니다. 행사가 끝난 뒤 원본을 보관해야 한다면 `photos/` 폴더를 먼저 백업하세요.
 
 ## 6. 기존 Pi에서 프로그램 업데이트
 
@@ -225,7 +234,7 @@ sudo reboot
 - QR 다운로드는 Pi와 스마트폰이 같은 Wi-Fi에 있어야 합니다. 행사장 공유기에서 기기 간 통신 차단(AP isolation)이 켜져 있으면 QR 접속이 실패합니다.
 - 최신 Raspberry Pi OS는 Wayland 기반입니다. 이 프로그램은 `SDL_VIDEODRIVER`를 강제하지 않고 자동 선택하게 두었습니다. 화면이 뜨지 않을 때만 `.env`에 `PHOTOBOOTH_SDL_VIDEODRIVER=x11` 또는 `wayland`를 지정해 테스트하세요.
 - 오디오 장치가 없어도 앱은 무음으로 실행됩니다. 문제가 계속되면 `.env`에 `PHOTOBOOTH_AUDIO_ENABLED=0`을 넣으세요.
-- `photos/` 폴더에 출력 JPEG가 계속 쌓입니다. 장기 운영 전에는 저장 공간을 확인하세요.
+- 자동 정리는 오래된 `photos/*.jpg`만 삭제합니다. 장기 보관이 필요한 사진은 행사 후 별도 저장장치로 옮기세요.
 
 ## 9. 문제 해결 명령
 

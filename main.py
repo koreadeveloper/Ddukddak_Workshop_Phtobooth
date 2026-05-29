@@ -311,6 +311,8 @@ class PhotoBooth:
         self.retake_index = None
         self.review_notice = ""
         self.review_notice_until = 0.0
+        self.cleanup_summary = "정리 전"
+        self.cleanup_checked_at = 0.0
         self._reset_session()
 
         # ── 상태 머신 ─────────────────────────────────
@@ -334,6 +336,7 @@ class PhotoBooth:
         self._print_thread  = None
         self._print_done    = False
         self._print_ok      = False
+        self._print_done_at = 0.0
 
         # ── 파티클 ────────────────────────────────────
         self.particles = [Particle() for _ in range(22)]
@@ -398,6 +401,7 @@ class PhotoBooth:
         )
 
         PHOTOS_DIR.mkdir(parents=True, exist_ok=True)
+        self._cleanup_old_photos(force=True)
         log.info(f"포토부스 초기화 완료 (test_mode={test_mode})")
 
     # ─────────────────────────────────────────────────
@@ -416,6 +420,7 @@ class PhotoBooth:
         self._compose_generation += 1
         self._print_done    = False
         self._print_ok      = False
+        self._print_done_at = 0.0
         self.print_copies   = max(1, min(DEFAULT_PRINT_COPIES, MAX_PRINT_COPIES))
         self.selected_retake_index = 0
         self.retake_index = None
@@ -455,6 +460,99 @@ class PhotoBooth:
             log.info(f"인쇄 매수 변경: {self.print_copies} → {copies}")
         self.print_copies = copies
 
+    def _photo_files(self):
+        if not PHOTOS_DIR.exists():
+            return []
+        files = []
+        for path in PHOTOS_DIR.glob("*.jpg"):
+            try:
+                if path.is_file():
+                    files.append((path.stat().st_mtime, path))
+            except OSError:
+                continue
+        return [path for _mtime, path in sorted(files)]
+
+    def _cleanup_old_photos(self, force: bool = False):
+        now = time.time()
+        if not force and now - self.cleanup_checked_at < CLEANUP_INTERVAL_SECS:
+            return
+
+        self.cleanup_checked_at = now
+        deleted = 0
+        errors = 0
+        files = self._photo_files()
+        protected_paths = set()
+        if self.strip_path:
+            try:
+                protected_paths.add(self.strip_path.resolve())
+            except Exception:
+                protected_paths.add(self.strip_path)
+
+        def _protected(path):
+            try:
+                return path.resolve() in protected_paths
+            except Exception:
+                return path in protected_paths
+
+        if PHOTO_RETENTION_DAYS > 0:
+            cutoff = now - PHOTO_RETENTION_DAYS * 86400
+            keep = []
+            for path in files:
+                try:
+                    if path.stat().st_mtime < cutoff and not _protected(path):
+                        path.unlink()
+                        deleted += 1
+                    else:
+                        keep.append(path)
+                except Exception as e:
+                    errors += 1
+                    log.warning(f"사진 정리 실패: {path} ({e})")
+            files = keep
+
+        if MAX_STORED_PHOTOS > 0 and len(files) > MAX_STORED_PHOTOS:
+            overflow = len(files) - MAX_STORED_PHOTOS
+            removable = [path for path in files if not _protected(path)]
+            for path in removable[:overflow]:
+                try:
+                    path.unlink()
+                    deleted += 1
+                except Exception as e:
+                    errors += 1
+                    log.warning(f"사진 정리 실패: {path} ({e})")
+            files = [path for path in files if path.exists()]
+
+        try:
+            total, _used, free = shutil.disk_usage(BASE_DIR)
+            min_free = max(0, MIN_FREE_GB) * (1024 ** 3)
+            while MIN_FREE_GB > 0 and free < min_free and files:
+                path = files.pop(0)
+                if _protected(path):
+                    continue
+                try:
+                    path.unlink()
+                    deleted += 1
+                    total, _used, free = shutil.disk_usage(BASE_DIR)
+                except Exception as e:
+                    errors += 1
+                    log.warning(f"저장공간 확보 실패: {path} ({e})")
+                    break
+            free_gb = free / (1024 ** 3)
+            total_gb = total / (1024 ** 3)
+        except Exception as e:
+            errors += 1
+            free_gb = total_gb = 0.0
+            log.warning(f"저장공간 확인 실패: {e}")
+
+        remaining = len(self._photo_files())
+        self.cleanup_summary = (
+            f"사진 {remaining}개 보관 · 정리 {deleted}개 · "
+            f"여유 {free_gb:.1f}/{total_gb:.1f}GB"
+        )
+        if errors:
+            self.cleanup_summary += f" · 오류 {errors}개"
+        if deleted or errors or force:
+            log.info(f"사진 보관 정리: {self.cleanup_summary}")
+
     def _set_review_notice(self, text: str, seconds: float = 3.5):
         self.review_notice = text
         self.review_notice_until = time.time() + seconds
@@ -489,6 +587,7 @@ class PhotoBooth:
             ("QR", qr_text, self.qr_server.is_running),
             ("저장공간", f"여유 {free // (1024 ** 3)}GB / 전체 {total // (1024 ** 3)}GB", free > 1024 ** 3),
             ("사진 폴더", f"{photos_count}개 JPG 저장됨", True),
+            ("보관 정리", self.cleanup_summary, True),
         ]
         self.status_checked_at = time.time()
 
@@ -621,6 +720,7 @@ class PhotoBooth:
                 if generation == self._compose_generation:
                     self.strip_path = strip_path
                     self.strip_surface = strip_surface
+                    self._cleanup_old_photos()
             except Exception as e:
                 log.error(f"합성 오류: {e}")
             finally:
@@ -646,6 +746,7 @@ class PhotoBooth:
 
     def _start_printing(self):
         self._print_done = False
+        self._print_done_at = 0.0
         self._set_state(St.PRINTING)
 
         def _work():
@@ -656,10 +757,19 @@ class PhotoBooth:
                 ok = False
             self._print_ok   = ok
             self._print_done = True
+            self._print_done_at = time.time()
             if self.snd_done and ok:
                 self.snd_done.play()
 
         threading.Thread(target=_work, daemon=True, name="printer").start()
+
+    def _finish_print_result(self):
+        if self._print_ok:
+            self._set_state(St.IDLE)
+            self._reset_session()
+        else:
+            self._set_state(St.REVIEW)
+            self._set_review_notice("인쇄에 실패했습니다. 프린터를 확인한 뒤 다시 시도하거나 QR을 사용하세요.", 6.0)
 
     # ─────────────────────────────────────────────────
     #  QR
@@ -830,8 +940,7 @@ class PhotoBooth:
             self._reset_session()
 
         elif self.state == St.PRINTING and self._print_done:
-            self._set_state(St.IDLE)
-            self._reset_session()
+            self._finish_print_result()
 
         elif self.state == St.STATUS:
             if self.btn_status_close.hit(pos):
@@ -1142,17 +1251,17 @@ class PhotoBooth:
         if not self.status_lines or time.time() - self.status_checked_at > 10:
             self._refresh_status()
 
-        y = 280
+        y = 250
         for title, detail, ok in self.status_lines:
             color = C_GREEN if ok else C_PINK
-            draw_rrect(self.screen, C_WHITE, (360, y - 20, 1200, 92), radius=12)
+            draw_rrect(self.screen, C_WHITE, (360, y - 16, 1200, 78), radius=12)
             draw_text(self.screen, "정상" if ok else "확인", self.f_medium, color,
-                      430, y + 24, anchor="center")
+                      430, y + 22, anchor="center")
             draw_text(self.screen, title, self.f_medium, C_DARK,
-                      540, y + 4, anchor="topleft")
+                      540, y + 2, anchor="topleft")
             draw_text(self.screen, detail[:70], self.f_small, C_GRAY,
-                      760, y + 10, anchor="topleft")
-            y += 118
+                      760, y + 8, anchor="topleft")
+            y += 92
 
         self.btn_status_close.draw(self.screen, self.f_medium)
 
@@ -1174,29 +1283,29 @@ class PhotoBooth:
             self.screen.blit(icon, icon.get_rect(
                 center=(SCREEN_W // 2, SCREEN_H // 2 - 200 + bounce_y)))
         else:
+            done_elapsed = time.time() - self._print_done_at if self._print_done_at else 0
+            remain = max(0, PRINT_RESULT_TIMEOUT - int(done_elapsed))
             if self._print_ok:
                 draw_text(self.screen, "인쇄 완료!", self.f_big, C_GREEN,
                           SCREEN_W // 2, SCREEN_H // 2 - 50, anchor="center")
                 draw_text(self.screen, f"프린터에서 사진 {self.print_copies}장을 가져가세요",
                           self.f_large, C_DARK,
                           SCREEN_W // 2, SCREEN_H // 2 + 50, anchor="center")
+                draw_text(self.screen, f"{remain}초 후 대기 화면으로 돌아갑니다",
+                          self.f_small, C_GRAY,
+                          SCREEN_W // 2, SCREEN_H // 2 + 120, anchor="center")
             else:
                 draw_text(self.screen, "인쇄 오류", self.f_big, C_GRAY,
                           SCREEN_W // 2, SCREEN_H // 2 - 50, anchor="center")
                 draw_text(self.screen, "프린터 연결을 확인해 주세요",
                           self.f_large, C_DARK,
                           SCREEN_W // 2, SCREEN_H // 2 + 50, anchor="center")
+                draw_text(self.screen, f"{remain}초 후 리뷰 화면으로 돌아갑니다",
+                          self.f_small, C_GRAY,
+                          SCREEN_W // 2, SCREEN_H // 2 + 120, anchor="center")
 
-            # 3초 후 자동으로 대기화면
-            remain = max(0, 3 - int(elapsed - (elapsed - 3 if elapsed > 3 else 0)))
-            if self._print_done:
-                wait_elapsed = time.time() - self.state_time
-                # _print_done이 설정된 이후 시간을 추적하기 위해 별도 타이머 필요
-                pass
-            # 단순 처리: 상태 진입 후 일정 시간 후 복귀
-            if elapsed > 5:
-                self._set_state(St.IDLE)
-                self._reset_session()
+            if done_elapsed >= PRINT_RESULT_TIMEOUT:
+                self._finish_print_result()
 
     # ═══════════════════════════════════════════════
     #  QR_SHOW 렌더링
@@ -1250,6 +1359,7 @@ class PhotoBooth:
             prev_time = now
 
             running = self._handle_events()
+            self._cleanup_old_photos()
 
             # ── 상태별 업데이트 & 렌더링 ───────────────
             if self.state == St.IDLE:
