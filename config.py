@@ -88,10 +88,10 @@ def _env_text(name: str, default: str) -> str:
 
 
 # ─── 브랜딩/행사명 ────────────────────────────────────
-BRAND_NAME = _env_text("PHOTOBOOTH_BRAND_NAME", "뚝딱 포토부스")
+BRAND_NAME = _env_text("PHOTOBOOTH_BRAND_NAME", "뚝딱이 창의공작소 포토부스")
 EVENT_TITLE = _env_text("PHOTOBOOTH_EVENT_TITLE", "오늘의 네컷")
-BOOTH_SUBTITLE = _env_text("PHOTOBOOTH_BOOTH_SUBTITLE", "뚝딱 공방 포토부스")
-FOOTER_TEXT = _env_text("PHOTOBOOTH_FOOTER_TEXT", "어린이 포토부스  |  뚝딱 공방")
+BOOTH_SUBTITLE = _env_text("PHOTOBOOTH_BOOTH_SUBTITLE", "뚝딱이 창의공작소 포토부스")
+FOOTER_TEXT = _env_text("PHOTOBOOTH_FOOTER_TEXT", "뚝딱이 창의공작소 포토부스")
 PRINT_BRAND_TEXT = _env_text("PHOTOBOOTH_PRINT_BRAND_TEXT", BRAND_NAME)
 PRINT_MARK_TEXT = _env_text("PHOTOBOOTH_PRINT_MARK_TEXT", "FOUR CUT")
 DOWNLOAD_FILENAME_PREFIX = _env_text("PHOTOBOOTH_DOWNLOAD_PREFIX", "photobooth")
@@ -123,12 +123,10 @@ CAM_MAX_READ_FAILURES = _env_int("PHOTOBOOTH_CAM_MAX_READ_FAILURES", 30)
 
 # 화면 미리보기는 거울처럼 보여 주되, 저장/인쇄 이미지는 실제 카메라 방향을 유지합니다.
 PREVIEW_MIRROR = _env_bool("PHOTOBOOTH_PREVIEW_MIRROR", True)
-SHOW_CROP_GUIDE = _env_bool("PHOTOBOOTH_SHOW_CROP_GUIDE", True)
 CAPTURE_ORIENTATION = _env_text("PHOTOBOOTH_CAPTURE_ORIENTATION", "portrait").lower()
 PORTRAIT_ROTATION = _env_text("PHOTOBOOTH_PORTRAIT_ROTATION", "clockwise").lower()
 DEFAULT_FILTER = _env_text("PHOTOBOOTH_DEFAULT_FILTER", "bright").lower()
 DEFAULT_FRAME_THEME = _env_text("PHOTOBOOTH_DEFAULT_FRAME_THEME", "soft_pink").lower()
-DEFAULT_PRINT_LAYOUT = _env_text("PHOTOBOOTH_DEFAULT_PRINT_LAYOUT", "auto").lower()
 
 # ─── 촬영 흐름 ───────────────────────────────────────
 PHOTO_COUNT      = 4     # 한 세션에 찍을 장수

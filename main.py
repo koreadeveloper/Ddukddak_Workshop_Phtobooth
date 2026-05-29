@@ -88,6 +88,21 @@ def fit_bgr_to_surface(bgr: np.ndarray, max_w: int, max_h: int) -> pygame.Surfac
     return bgr_to_surface(bgr, target)
 
 
+def center_crop_bgr_to_aspect(bgr: np.ndarray, target_aspect: float) -> np.ndarray:
+    """BGR frame을 지정한 가로/세로 비율로 중앙 크롭합니다."""
+    h, w = bgr.shape[:2]
+    if h <= 0 or w <= 0 or target_aspect <= 0:
+        return bgr
+    frame_aspect = w / h
+    if frame_aspect > target_aspect:
+        new_w = max(1, int(h * target_aspect))
+        x = max(0, (w - new_w) // 2)
+        return bgr[:, x:x + new_w]
+    new_h = max(1, int(w / target_aspect))
+    y = max(0, (h - new_h) // 2)
+    return bgr[y:y + new_h, :]
+
+
 def pil_to_surface(pil_img) -> pygame.Surface:
     """PIL Image → pygame Surface"""
     arr = np.array(pil_img.convert("RGB"))
@@ -326,10 +341,7 @@ class PhotoBooth:
             DEFAULT_FRAME_THEME if DEFAULT_FRAME_THEME in composer.FRAME_THEMES
             else "soft_pink"
         )
-        self.selected_print_layout = (
-            DEFAULT_PRINT_LAYOUT if DEFAULT_PRINT_LAYOUT in composer.PRINT_LAYOUTS
-            else "auto"
-        )
+        self.selected_print_layout = "grid"
         self.print_copies = max(1, min(DEFAULT_PRINT_COPIES, MAX_PRINT_COPIES))
         self._compose_generation = 0
         self.status_lines = []
@@ -371,36 +383,11 @@ class PhotoBooth:
 
         # ── 버튼 (REVIEW 화면) ─────────────────────────
         self.btn_start = Button(
-            1260, 850, 430, 92, "촬영 시작", C_PINK, radius=28
+            SCREEN_W // 2 - 250, 930, 500, 92, "촬영 시작", C_PINK, radius=28
         )
         self.btn_status = Button(
             1540, 38, 270, 58, "운영 점검", (110, 110, 120), radius=18
         )
-        self.btn_portrait = Button(
-            930, 218, 220, 62, "세로 촬영", C_BLUE, radius=22
-        )
-        self.btn_landscape = Button(
-            1170, 218, 220, 62, "가로 촬영", (110, 110, 120), radius=22
-        )
-        self.layout_buttons = []
-        for i, (layout_id, label) in enumerate(composer.PRINT_LAYOUTS.items()):
-            self.layout_buttons.append(
-                (layout_id, Button(1410 + i * 125, 218, 112, 62, label, (110, 110, 120), radius=18))
-            )
-        self.frame_buttons = []
-        for i, (theme_id, theme) in enumerate(composer.FRAME_THEMES.items()):
-            x = 930 + (i % 2) * 240
-            y = 390 + (i // 2) * 76
-            self.frame_buttons.append(
-                (theme_id, Button(x, y, 220, 58, theme["name"], (110, 110, 120), radius=18))
-            )
-        self.filter_buttons = []
-        for i, (filter_id, meta) in enumerate(FILTERS.items()):
-            x = 930 + (i % 3) * 170
-            y = 610 + (i // 3) * 72
-            self.filter_buttons.append(
-                (filter_id, Button(x, y, 150, 56, meta["name"], (110, 110, 120), radius=18))
-            )
         self.review_frame_buttons = []
         for i, (theme_id, theme) in enumerate(composer.FRAME_THEMES.items()):
             x = 1120 + (i % 2) * 220
@@ -415,11 +402,10 @@ class PhotoBooth:
             self.review_filter_buttons.append(
                 (filter_id, Button(x, y, 200, 50, meta["name"], (110, 110, 120), radius=16))
             )
-        self.review_layout_buttons = []
-        for i, (layout_id, label) in enumerate(composer.PRINT_LAYOUTS.items()):
-            self.review_layout_buttons.append(
-                (layout_id, Button(1120 + i * 148, 356, 132, 52, label, (110, 110, 120), radius=16))
-            )
+        self.review_orientation_buttons = [
+            ("portrait", Button(1120, 356, 200, 52, "세로", (110, 110, 120), radius=16)),
+            ("landscape", Button(1340, 356, 200, 52, "가로", (110, 110, 120), radius=16)),
+        ]
 
         bw, bh, gap = 330, 80, 36
         total = 3 * bw + 2 * gap
@@ -448,6 +434,7 @@ class PhotoBooth:
     # ─────────────────────────────────────────────────
     def _reset_session(self):
         self.session_id     = uuid.uuid4().hex[:12]
+        self.captured_source_bgr = []   # 카메라 원본 BGR ndarray 목록
         self.captured_raw_bgr = []      # 방향만 보정된 원본 BGR ndarray 목록
         self.captured_bgr   = []        # BGR ndarray 목록
         self.strip_path     = None
@@ -472,11 +459,6 @@ class PhotoBooth:
             "idle": [
                 self.btn_start,
                 self.btn_status,
-                self.btn_portrait,
-                self.btn_landscape,
-                *(btn for _id, btn in self.layout_buttons),
-                *(btn for _id, btn in self.frame_buttons),
-                *(btn for _id, btn in self.filter_buttons),
             ],
             "review": [
                 self.btn_print,
@@ -486,8 +468,8 @@ class PhotoBooth:
                 self.btn_copies_minus,
                 self.btn_copies_plus,
                 *(btn for _id, btn in self.review_frame_buttons),
+                *(btn for _id, btn in self.review_orientation_buttons),
                 *(btn for _id, btn in self.review_filter_buttons),
-                *(btn for _id, btn in self.review_layout_buttons),
             ],
             "status": [self.btn_status_close],
         }
@@ -503,10 +485,13 @@ class PhotoBooth:
 
     def _set_capture_orientation(self, orientation: str):
         if orientation not in {"portrait", "landscape"}:
-            return
+            return False
         if self.capture_orientation != orientation:
             log.info(f"촬영 방향 변경: {self.capture_orientation} → {orientation}")
+            self.capture_orientation = orientation
+            return True
         self.capture_orientation = orientation
+        return False
 
     def _set_frame_theme(self, theme_id: str):
         if theme_id not in composer.FRAME_THEMES:
@@ -526,16 +511,6 @@ class PhotoBooth:
             self.selected_filter = filter_id
             return True
         self.selected_filter = filter_id
-        return False
-
-    def _set_print_layout(self, layout_id: str):
-        if layout_id not in composer.PRINT_LAYOUTS:
-            return False
-        if self.selected_print_layout != layout_id:
-            log.info(f"출력 레이아웃 변경: {self.selected_print_layout} → {layout_id}")
-            self.selected_print_layout = layout_id
-            return True
-        self.selected_print_layout = layout_id
         return False
 
     def _set_print_copies(self, copies: int):
@@ -729,50 +704,12 @@ class PhotoBooth:
             frame = cv2.flip(frame, 1)
         return frame
 
-    def _draw_crop_guide(self, image_rect: pygame.Rect, frame_shape):
-        if not SHOW_CROP_GUIDE:
-            return
-
-        frame_h, frame_w = frame_shape[:2]
-        if frame_h <= 0 or frame_w <= 0 or image_rect.width <= 0 or image_rect.height <= 0:
-            return
-
-        frame_aspect = frame_w / frame_h
-        target_aspect = composer.photo_slot_aspect(frame_w >= frame_h, self.selected_print_layout)
-        if frame_aspect > target_aspect:
-            guide_h = image_rect.height
-            guide_w = int(guide_h * target_aspect)
-        else:
-            guide_w = image_rect.width
-            guide_h = int(guide_w / target_aspect)
-
-        guide_w = min(image_rect.width, max(1, guide_w))
-        guide_h = min(image_rect.height, max(1, guide_h))
-        guide = pygame.Rect(
-            image_rect.x + (image_rect.width - guide_w) // 2,
-            image_rect.y + (image_rect.height - guide_h) // 2,
-            guide_w,
-            guide_h,
+    def _preview_crop_frame(self, frame: np.ndarray) -> np.ndarray:
+        frame_h, frame_w = frame.shape[:2]
+        target_aspect = composer.photo_slot_aspect(
+            frame_w >= frame_h, self.selected_print_layout
         )
-
-        shade = pygame.Surface((image_rect.width, image_rect.height), pygame.SRCALPHA)
-        local = guide.move(-image_rect.x, -image_rect.y)
-        shade_color = (0, 0, 0, 72)
-        pygame.draw.rect(shade, shade_color, (0, 0, image_rect.width, local.top))
-        pygame.draw.rect(shade, shade_color, (0, local.bottom, image_rect.width, image_rect.height - local.bottom))
-        pygame.draw.rect(shade, shade_color, (0, local.top, local.left, local.height))
-        pygame.draw.rect(shade, shade_color, (local.right, local.top, image_rect.width - local.right, local.height))
-        self.screen.blit(shade, image_rect.topleft)
-
-        pygame.draw.rect(self.screen, C_WHITE, guide, 4, border_radius=10)
-        pygame.draw.rect(self.screen, C_YELLOW, guide.inflate(-8, -8), 2, border_radius=8)
-
-        line_color = (255, 255, 255)
-        for i in (1, 2):
-            x = guide.left + guide.width * i // 3
-            y = guide.top + guide.height * i // 3
-            pygame.draw.line(self.screen, line_color, (x, guide.top + 12), (x, guide.bottom - 12), 1)
-            pygame.draw.line(self.screen, line_color, (guide.left + 12, y), (guide.right - 12, y), 1)
+        return center_crop_bgr_to_aspect(frame, target_aspect)
 
     def _draw_camera_preview_fullscreen(self, frame: np.ndarray):
         if frame is None:
@@ -787,11 +724,11 @@ class PhotoBooth:
             return
         self.screen.fill((20, 20, 30))
         display_frame = self._display_frame(frame)
+        display_frame = self._preview_crop_frame(display_frame)
         prev = fit_bgr_to_surface(display_frame, SCREEN_W, SCREEN_H)
         pw, ph = prev.get_size()
         rect = pygame.Rect((SCREEN_W - pw) // 2, (SCREEN_H - ph) // 2, pw, ph)
         self.screen.blit(prev, rect.topleft)
-        self._draw_crop_guide(rect, display_frame.shape)
 
     def _review_thumb_size(self) -> tuple[int, int]:
         if self.capture_orientation == "portrait":
@@ -799,6 +736,11 @@ class PhotoBooth:
         return 230, 150
 
     def _refresh_processed_photos(self):
+        if len(self.captured_source_bgr) == len(self.captured_raw_bgr):
+            self.captured_raw_bgr = [
+                self._oriented_frame(source).copy()
+                for source in self.captured_source_bgr
+            ]
         self.captured_bgr = [
             apply_filter(raw, self.selected_filter)
             for raw in self.captured_raw_bgr
@@ -853,10 +795,12 @@ class PhotoBooth:
         if frame is None:
             log.warning("카메라 프레임이 준비되지 않아 촬영을 다시 대기합니다")
             return False
-        raw = self._oriented_frame(frame).copy()
+        source = frame.copy()
+        raw = self._oriented_frame(source).copy()
         processed = apply_filter(raw, self.selected_filter)
         if self.retake_index is not None:
             idx = self.retake_index
+            self.captured_source_bgr[idx] = source
             self.captured_raw_bgr[idx] = raw
             self.captured_bgr[idx] = processed
             self.thumb_surfaces = []
@@ -868,6 +812,7 @@ class PhotoBooth:
             self.retake_index = None
             log.info(f"{idx + 1}번 컷 재촬영 완료")
         else:
+            self.captured_source_bgr.append(source)
             self.captured_raw_bgr.append(raw)
             self.captured_bgr.append(processed)
             log.info(f"촬영 {len(self.captured_bgr)}/{PHOTO_COUNT}")
@@ -1038,22 +983,14 @@ class PhotoBooth:
         if self.state == St.IDLE:
             self.btn_start.update(mpos, mpressed)
             self.btn_status.update(mpos, mpressed)
-            self.btn_portrait.update(mpos, mpressed)
-            self.btn_landscape.update(mpos, mpressed)
-            for _, btn in self.layout_buttons:
-                btn.update(mpos, mpressed)
-            for _, btn in self.frame_buttons:
-                btn.update(mpos, mpressed)
-            for _, btn in self.filter_buttons:
-                btn.update(mpos, mpressed)
         elif self.state == St.REVIEW:
             for btn in (self.btn_print, self.btn_qr, self.btn_retake, self.btn_retake_selected):
                 btn.update(mpos, mpressed)
             for _, btn in self.review_frame_buttons:
                 btn.update(mpos, mpressed)
-            for _, btn in self.review_filter_buttons:
+            for _, btn in self.review_orientation_buttons:
                 btn.update(mpos, mpressed)
-            for _, btn in self.review_layout_buttons:
+            for _, btn in self.review_filter_buttons:
                 btn.update(mpos, mpressed)
             self.btn_copies_minus.update(mpos, mpressed)
             self.btn_copies_plus.update(mpos, mpressed)
@@ -1068,24 +1005,6 @@ class PhotoBooth:
                 self._refresh_status()
                 self._set_state(St.STATUS)
                 return
-            if self.btn_portrait.hit(pos):
-                self._set_capture_orientation("portrait")
-                return
-            if self.btn_landscape.hit(pos):
-                self._set_capture_orientation("landscape")
-                return
-            for layout_id, btn in self.layout_buttons:
-                if btn.hit(pos):
-                    self._set_print_layout(layout_id)
-                    return
-            for theme_id, btn in self.frame_buttons:
-                if btn.hit(pos):
-                    self._set_frame_theme(theme_id)
-                    return
-            for filter_id, btn in self.filter_buttons:
-                if btn.hit(pos):
-                    self._set_filter(filter_id)
-                    return
             self._begin_countdown()
 
         elif self.state == St.REVIEW:
@@ -1111,12 +1030,12 @@ class PhotoBooth:
                     if self._set_filter(filter_id):
                         self._recompose_current_session()
                     return
-            for layout_id, btn in self.review_layout_buttons:
+            for orientation, btn in self.review_orientation_buttons:
                 if btn.hit(pos):
                     if self._composing:
                         self._set_review_notice("사진 합성 중입니다. 잠시 후 다시 눌러 주세요.")
                         return
-                    if self._set_print_layout(layout_id):
+                    if self._set_capture_orientation(orientation):
                         self._recompose_current_session()
                     return
             if self.btn_copies_minus.hit(pos):
@@ -1171,68 +1090,32 @@ class PhotoBooth:
             p.update(dt)
             p.draw(self.screen)
 
-        # 메인 타이틀
-        draw_text(self.screen, EVENT_TITLE or BRAND_NAME, self.f_big, C_PINK,
-                  470, 88, anchor="center",
+        # FHD 15.6인치 모니터 기준 첫 화면: 제목, 실제 출력 크롭, 시작 버튼만 배치합니다.
+        draw_text(self.screen, EVENT_TITLE or "오늘의 네컷", self.f_big, C_PINK,
+                  SCREEN_W // 2, 72, anchor="center",
                   shadow=True, shadow_color=C_LPINK, shadow_off=4,
-                  max_width=760)
-
-        if BOOTH_SUBTITLE:
-            draw_text(self.screen, BOOTH_SUBTITLE, self.f_medium, C_GRAY,
-                      470, 152, anchor="center", max_width=760)
+                  max_width=1180)
+        draw_text(self.screen, BOOTH_SUBTITLE or BRAND_NAME, self.f_large, C_DARK,
+                  SCREEN_W // 2, 158, anchor="center", max_width=1280)
         self.btn_status.draw(self.screen, self.f_small)
 
-        panel_x = 860
-        draw_text(self.screen, "촬영 방향", self.f_medium, C_DARK,
-                  panel_x, 176, anchor="topleft")
-        self.btn_portrait.set_color(
-            C_BLUE if self.capture_orientation == "portrait" else (110, 110, 120)
-        )
-        self.btn_landscape.set_color(
-            C_BLUE if self.capture_orientation == "landscape" else (110, 110, 120)
-        )
-        self.btn_portrait.draw(self.screen, self.f_medium)
-        self.btn_landscape.draw(self.screen, self.f_medium)
-
-        draw_text(self.screen, "출력 레이아웃", self.f_medium, C_DARK,
-                  1410, 176, anchor="topleft")
-        self._draw_selected_button_group(
-            self.selected_print_layout, self.layout_buttons, C_BLUE)
-
-        draw_text(self.screen, "프레임", self.f_medium, C_DARK,
-                  panel_x, 342, anchor="topleft")
-        self._draw_selected_button_group(
-            self.selected_frame_theme, self.frame_buttons, C_PINK)
-
-        draw_text(self.screen, "필터", self.f_medium, C_DARK,
-                  panel_x, 562, anchor="topleft")
-        self._draw_selected_button_group(
-            self.selected_filter, self.filter_buttons, C_BLUE)
-
-        theme_name = composer.FRAME_THEMES[self.selected_frame_theme]["name"]
-        filter_name = FILTERS[self.selected_filter]["name"]
-        layout_name = composer.PRINT_LAYOUTS[self.selected_print_layout]
-        draw_text(self.screen, f"{theme_name} · {filter_name} · {layout_name}",
-                  self.f_small, C_GRAY, 1475, 794, anchor="center",
-                  max_width=620)
-
-        self.btn_start.draw(self.screen, self.f_large)
-
-        # 카메라 소형 미리보기
         frame = self._camera_frame()
         if frame is not None:
             frame = self._display_frame(frame)
-            box_w, box_h = 700, 790
+            frame = self._preview_crop_frame(frame)
+            box_w, box_h = 820, 680
             prev = fit_bgr_to_surface(frame, box_w, box_h)
             pw, ph = prev.get_size()
-            px = 110 + (box_w - pw) // 2
-            py = 220 + (box_h - ph) // 2
+            px = SCREEN_W // 2 - pw // 2
+            py = 218 + (box_h - ph) // 2
             draw_rrect(self.screen, C_LPINK,
-                       (px - 6, py - 6, pw + 12, ph + 12), radius=14)
+                       (px - 8, py - 8, pw + 16, ph + 16), radius=14)
             self.screen.blit(prev, (px, py))
-            self._draw_crop_guide(pygame.Rect(px, py, pw, ph), frame.shape)
-            draw_text(self.screen, "지금 모습이에요", self.f_small, C_GRAY,
-                      110 + box_w // 2, 1018, anchor="center")
+        else:
+            draw_text(self.screen, "카메라 연결을 확인하고 있습니다", self.f_medium, C_GRAY,
+                      SCREEN_W // 2, 520, anchor="center", max_width=1000)
+
+        self.btn_start.draw(self.screen, self.f_large)
 
         # 하단 정보
         if FOOTER_TEXT:
@@ -1414,10 +1297,10 @@ class PhotoBooth:
         self._draw_selected_button_group(
             self.selected_frame_theme, self.review_frame_buttons, C_PINK)
 
-        draw_text(self.screen, "레이아웃 다시 선택", self.f_medium, C_DARK,
+        draw_text(self.screen, "촬영 방향 다시 선택", self.f_medium, C_DARK,
                   1120, 314, anchor="topleft")
         self._draw_selected_button_group(
-            self.selected_print_layout, self.review_layout_buttons, C_BLUE)
+            self.capture_orientation, self.review_orientation_buttons, C_BLUE)
 
         draw_text(self.screen, "필터 다시 선택", self.f_medium, C_DARK,
                   1120, 436, anchor="topleft")
@@ -1426,8 +1309,7 @@ class PhotoBooth:
 
         theme_name = composer.FRAME_THEMES[self.selected_frame_theme]["name"]
         filter_name = FILTERS[self.selected_filter]["name"]
-        layout_name = composer.PRINT_LAYOUTS[self.selected_print_layout]
-        draw_text(self.screen, f"{theme_name} 프레임 · {filter_name} 필터 · {layout_name}",
+        draw_text(self.screen, f"{theme_name} 프레임 · {filter_name} 필터 · 2x2 고정",
                   self.f_small, C_GRAY, 1340, 690, anchor="center",
                   max_width=500)
 

@@ -145,7 +145,7 @@ cd ~/photobooth
 
 기본 출력은 CP1500 RP-108 Postcard Size `100 x 148 mm` 기준 `1181 x 1748 px @ 300dpi`입니다. 한 파일에는 네 컷만 들어갑니다.
 
-세로 촬영이 기본입니다. 화면에서 `세로 촬영` / `가로 촬영` 버튼을 눌러 세션 시작 전에 바꿀 수 있습니다. 촬영 후 리뷰 화면에서도 프레임과 필터를 다시 고르면 최종 출력 파일이 자동으로 다시 합성됩니다. 세로 사진이 거꾸로 저장되면 `.env`에서 아래 값을 바꾸거나 실행 옵션을 사용하세요.
+세로 촬영이 기본입니다. 시작 화면은 `오늘의 네컷` / `뚝딱이 창의공작소 포토부스` 큰 제목, 실제 출력에 들어가는 중앙 크롭 미리보기, `촬영 시작` 버튼만 보여줍니다. 촬영 후 리뷰 화면에서 촬영 방향, 프레임, 필터를 다시 고르면 최종 출력 파일이 자동으로 다시 합성됩니다. 세로 사진이 거꾸로 저장되면 `.env`에서 아래 값을 바꾸거나 실행 옵션을 사용하세요.
 
 ```bash
 PHOTOBOOTH_PORTRAIT_ROTATION=counterclockwise
@@ -154,20 +154,18 @@ PHOTOBOOTH_PORTRAIT_ROTATION=counterclockwise
 기본 프레임/필터도 `.env`에서 바꿀 수 있습니다.
 
 ```bash
-PHOTOBOOTH_BRAND_NAME="뚝딱 포토부스"
+PHOTOBOOTH_BRAND_NAME="뚝딱이 창의공작소 포토부스"
 PHOTOBOOTH_EVENT_TITLE="오늘의 네컷"
-PHOTOBOOTH_BOOTH_SUBTITLE="뚝딱 공방 포토부스"
-PHOTOBOOTH_FOOTER_TEXT="어린이 포토부스  |  뚝딱 공방"
-PHOTOBOOTH_PRINT_BRAND_TEXT="뚝딱 포토부스"
+PHOTOBOOTH_BOOTH_SUBTITLE="뚝딱이 창의공작소 포토부스"
+PHOTOBOOTH_FOOTER_TEXT="뚝딱이 창의공작소 포토부스"
+PHOTOBOOTH_PRINT_BRAND_TEXT="뚝딱이 창의공작소"
 PHOTOBOOTH_PRINT_MARK_TEXT="FOUR CUT"
 PHOTOBOOTH_DOWNLOAD_PREFIX=photobooth
 PHOTOBOOTH_DEFAULT_FRAME_THEME=soft_pink  # soft_pink/classic_white/studio_black/sky_blue
 PHOTOBOOTH_DEFAULT_FILTER=bright          # original/bright/warm/cool/mono
-PHOTOBOOTH_DEFAULT_PRINT_LAYOUT=auto      # auto/grid/stacked
 PHOTOBOOTH_CAM_STALE_SECS=3
 PHOTOBOOTH_CAM_RECONNECT_SECS=2
 PHOTOBOOTH_CAM_MAX_READ_FAILURES=30
-PHOTOBOOTH_SHOW_CROP_GUIDE=1
 PHOTOBOOTH_DEFAULT_PRINT_COPIES=1
 PHOTOBOOTH_MAX_PRINT_COPIES=3
 PHOTOBOOTH_REVIEW_TIMEOUT=120
@@ -182,15 +180,11 @@ PHOTOBOOTH_CLEANUP_INTERVAL_SECS=3600
 
 행사명이나 기관명을 바꾸려면 위 브랜딩 값을 수정하세요. 공백이 들어가는 값은 위 예시처럼 따옴표로 감싸는 것이 안전합니다. `PHOTOBOOTH_PRINT_BRAND_TEXT`는 인쇄물 하단 문구, `PHOTOBOOTH_DOWNLOAD_PREFIX`는 QR 다운로드 파일명 앞부분에 사용됩니다.
 
-촬영 화면의 밝은 사각형은 실제 인쇄물에 남는 영역입니다. 사각형 밖은 최종 네컷 합성 과정에서 잘릴 수 있으므로 얼굴과 손동작은 사각형 안쪽에 들어오게 맞추세요. 운영 중 이 표시가 불필요하면 `.env`에서 끌 수 있습니다.
-
-```bash
-PHOTOBOOTH_SHOW_CROP_GUIDE=0
-```
+시작 화면과 촬영 화면의 카메라 영상은 최종 네컷 합성에 실제로 들어갈 중앙 크롭만 보여줍니다. 화면에 보이지 않는 바깥 영역은 인쇄물에도 들어가지 않으므로 얼굴과 손동작은 보이는 화면 안쪽에 맞추세요.
 
 웹캠 프레임이 끊기면 프로그램은 자동 재연결을 시도하고, 새 프레임이 들어오기 전에는 촬영을 완료하지 않습니다. 행사 중 USB 허브나 전원 문제로 화면이 멈추는 경우 `운영 점검`에서 카메라 재연결 횟수를 확인하세요.
 
-출력 레이아웃은 시작 화면과 리뷰 화면에서 바꿀 수 있습니다. `auto`는 세로 촬영이면 `2x2`, 가로 촬영이면 `4단`을 자동으로 사용합니다. 어떤 모드든 RP-108 4x6 파일 하나에는 네 컷만 들어갑니다.
+출력 레이아웃은 `2x2`로 고정입니다. 시작 화면과 리뷰 화면에서 `auto`나 `4단`을 선택할 수 없고, RP-108 4x6 파일 하나에는 네 컷만 들어갑니다.
 
 리뷰 화면에서는 인쇄 매수를 `1~PHOTOBOOTH_MAX_PRINT_COPIES` 범위에서 바꿀 수 있습니다. 손님이 리뷰 화면을 오래 방치하면 `PHOTOBOOTH_REVIEW_TIMEOUT`초 뒤 대기 화면으로 자동 복귀합니다. 시작 화면의 `운영 점검`에서는 카메라 프레임, CUPS 프린터 등록, QR 서버 주소, 저장공간을 확인할 수 있습니다.
 
