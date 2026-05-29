@@ -94,8 +94,29 @@ def pil_to_surface(pil_img) -> pygame.Surface:
     return pygame.surfarray.make_surface(arr.swapaxes(0, 1))
 
 
+def fit_text(text, font, max_width: int | None):
+    text = str(text)
+    if max_width is None or font.size(text)[0] <= max_width:
+        return text
+
+    ellipsis = "..."
+    if font.size(ellipsis)[0] > max_width:
+        return ""
+
+    lo, hi = 0, len(text)
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if font.size(text[:mid].rstrip() + ellipsis)[0] <= max_width:
+            lo = mid
+        else:
+            hi = mid - 1
+    return text[:lo].rstrip() + ellipsis
+
+
 def draw_text(surface, text, font, color, x, y, anchor="topleft",
-              shadow=False, shadow_color=(0, 0, 0), shadow_off=3):
+              shadow=False, shadow_color=(0, 0, 0), shadow_off=3,
+              max_width: int | None = None):
+    text = fit_text(text, font, max_width)
     if shadow:
         s = font.render(text, True, shadow_color)
         r = s.get_rect(**{anchor: (x + shadow_off, y + shadow_off)})
@@ -155,7 +176,8 @@ class Button:
               self.hover_col if self._hov else self.color)
         draw_rrect(surf, col, self.rect, self.radius)
         draw_text(surf, self.label, font, self.text_color,
-                  self.rect.centerx, self.rect.centery, anchor="center")
+                  self.rect.centerx, self.rect.centery, anchor="center",
+                  max_width=self.rect.width - 24)
 
     def hit(self, pos) -> bool:
         return self.rect.collidepoint(pos)
@@ -415,6 +437,7 @@ class PhotoBooth:
         self.btn_status_close = Button(
             SCREEN_W // 2 - 165, SCREEN_H - 140, 330, 72, "돌아가기", C_BLUE, radius=20
         )
+        self._audit_button_layout()
 
         PHOTOS_DIR.mkdir(parents=True, exist_ok=True)
         self._cleanup_old_photos(force=True)
@@ -443,6 +466,40 @@ class PhotoBooth:
         self.review_notice = ""
         self.review_notice_until = 0.0
         self.session_counted = False
+
+    def _audit_button_layout(self):
+        groups = {
+            "idle": [
+                self.btn_start,
+                self.btn_status,
+                self.btn_portrait,
+                self.btn_landscape,
+                *(btn for _id, btn in self.layout_buttons),
+                *(btn for _id, btn in self.frame_buttons),
+                *(btn for _id, btn in self.filter_buttons),
+            ],
+            "review": [
+                self.btn_print,
+                self.btn_qr,
+                self.btn_retake,
+                self.btn_retake_selected,
+                self.btn_copies_minus,
+                self.btn_copies_plus,
+                *(btn for _id, btn in self.review_frame_buttons),
+                *(btn for _id, btn in self.review_filter_buttons),
+                *(btn for _id, btn in self.review_layout_buttons),
+            ],
+            "status": [self.btn_status_close],
+        }
+        for group_name, buttons in groups.items():
+            for i, first in enumerate(buttons):
+                for second in buttons[i + 1:]:
+                    if first.rect.colliderect(second.rect):
+                        log.warning(
+                            "UI 버튼 좌표 겹침: "
+                            f"{group_name} '{first.label}' {first.rect} / "
+                            f"'{second.label}' {second.rect}"
+                        )
 
     def _set_capture_orientation(self, orientation: str):
         if orientation not in {"portrait", "landscape"}:
@@ -722,9 +779,11 @@ class PhotoBooth:
             self.screen.fill((20, 20, 30))
             health = self._camera_health()
             draw_text(self.screen, "카메라 재연결 중", self.f_big, C_WHITE,
-                      SCREEN_W // 2, SCREEN_H // 2 - 30, anchor="center")
+                      SCREEN_W // 2, SCREEN_H // 2 - 30, anchor="center",
+                      max_width=1200)
             draw_text(self.screen, health["status"], self.f_medium, C_GRAY,
-                      SCREEN_W // 2, SCREEN_H // 2 + 54, anchor="center")
+                      SCREEN_W // 2, SCREEN_H // 2 + 54, anchor="center",
+                      max_width=1200)
             return
         self.screen.fill((20, 20, 30))
         display_frame = self._display_frame(frame)
@@ -1115,11 +1174,12 @@ class PhotoBooth:
         # 메인 타이틀
         draw_text(self.screen, EVENT_TITLE or BRAND_NAME, self.f_big, C_PINK,
                   470, 88, anchor="center",
-                  shadow=True, shadow_color=C_LPINK, shadow_off=4)
+                  shadow=True, shadow_color=C_LPINK, shadow_off=4,
+                  max_width=760)
 
         if BOOTH_SUBTITLE:
             draw_text(self.screen, BOOTH_SUBTITLE, self.f_medium, C_GRAY,
-                      470, 152, anchor="center")
+                      470, 152, anchor="center", max_width=760)
         self.btn_status.draw(self.screen, self.f_small)
 
         panel_x = 860
@@ -1153,7 +1213,8 @@ class PhotoBooth:
         filter_name = FILTERS[self.selected_filter]["name"]
         layout_name = composer.PRINT_LAYOUTS[self.selected_print_layout]
         draw_text(self.screen, f"{theme_name} · {filter_name} · {layout_name}",
-                  self.f_small, C_GRAY, 1475, 794, anchor="center")
+                  self.f_small, C_GRAY, 1475, 794, anchor="center",
+                  max_width=620)
 
         self.btn_start.draw(self.screen, self.f_large)
 
@@ -1176,7 +1237,8 @@ class PhotoBooth:
         # 하단 정보
         if FOOTER_TEXT:
             draw_text(self.screen, FOOTER_TEXT, self.f_tiny, C_LGRAY,
-                      SCREEN_W // 2, SCREEN_H - 30, anchor="center")
+                      SCREEN_W // 2, SCREEN_H - 30, anchor="center",
+                      max_width=1600)
 
     # ═══════════════════════════════════════════════
     #  COUNTDOWN 렌더링 & 업데이트
@@ -1220,7 +1282,7 @@ class PhotoBooth:
         else:
             shot_label = f"{len(self.captured_bgr) + 1} / {PHOTO_COUNT}"
         draw_text(self.screen, shot_label, self.f_large, C_WHITE,
-                  SCREEN_W // 2, 44, anchor="center")
+                  SCREEN_W // 2, 44, anchor="center", max_width=1200)
 
         # 카운트다운 숫자 (그림자 + 펄스 효과)
         pulse = 1.0 + 0.06 * math.sin(time.time() * 6)
@@ -1238,7 +1300,8 @@ class PhotoBooth:
                                     SCREEN_H // 2 - h // 2))
 
         draw_text(self.screen, "움직이지 마세요!", self.f_medium, C_WHITE,
-                  SCREEN_W // 2, SCREEN_H // 2 + h // 2 + 20, anchor="center")
+                  SCREEN_W // 2, SCREEN_H // 2 + h // 2 + 20,
+                  anchor="center", max_width=1200)
 
         # 하단 찍힌 사진 썸네일
         self._draw_shot_thumbnails()
@@ -1275,7 +1338,8 @@ class PhotoBooth:
         n = len(self.captured_bgr)
         draw_text(self.screen, f"찰칵!  {n} / {PHOTO_COUNT}", self.f_big, C_YELLOW,
                   SCREEN_W // 2, SCREEN_H // 2, anchor="center",
-                  shadow=True, shadow_color=(100, 80, 0), shadow_off=4)
+                  shadow=True, shadow_color=(100, 80, 0), shadow_off=4,
+                  max_width=1200)
 
         self._draw_shot_thumbnails()
 
@@ -1297,7 +1361,7 @@ class PhotoBooth:
         self.screen.fill(C_BG)
 
         draw_text(self.screen, "최종 사진 확인", self.f_large, C_PINK,
-                  SCREEN_W // 2, 44, anchor="center")
+                  SCREEN_W // 2, 44, anchor="center", max_width=900)
 
         # ── 좌측: 최종 출력 미리보기 ──────────────────
         preview_x = 80
@@ -1312,7 +1376,7 @@ class PhotoBooth:
             cy = SCREEN_H // 2 - 60
             dots = "." * (int(time.time() * 2.5) % 4)
             draw_text(self.screen, f"합성 중{dots}", self.f_medium, C_GRAY,
-                      cx, cy, anchor="center")
+                      cx, cy, anchor="center", max_width=520)
 
         # ── 가운데: 4개 촬영 컷 ───────────────────────
         grid_x = 700
@@ -1340,7 +1404,8 @@ class PhotoBooth:
                 draw_rrect(self.screen, border_color, rect, radius=12)
 
         draw_text(self.screen, "썸네일을 눌러 다시 찍을 컷을 고르세요.",
-                  self.f_tiny, C_GRAY, 858, 626, anchor="center")
+                  self.f_tiny, C_GRAY, 858, 626, anchor="center",
+                  max_width=390)
         self.btn_retake_selected.draw(self.screen, self.f_small)
 
         # ── 우측: 촬영 후 프레임/필터 선택 ─────────────
@@ -1363,7 +1428,8 @@ class PhotoBooth:
         filter_name = FILTERS[self.selected_filter]["name"]
         layout_name = composer.PRINT_LAYOUTS[self.selected_print_layout]
         draw_text(self.screen, f"{theme_name} 프레임 · {filter_name} 필터 · {layout_name}",
-                  self.f_small, C_GRAY, 1340, 690, anchor="center")
+                  self.f_small, C_GRAY, 1340, 690, anchor="center",
+                  max_width=500)
 
         draw_text(self.screen, "인쇄 매수", self.f_medium, C_DARK,
                   1120, 724, anchor="topleft")
@@ -1387,11 +1453,13 @@ class PhotoBooth:
 
         if self.review_notice and time.time() < self.review_notice_until:
             draw_text(self.screen, self.review_notice, self.f_small, C_PINK,
-                      SCREEN_W // 2, SCREEN_H - 138, anchor="center")
+                      SCREEN_W // 2, SCREEN_H - 138, anchor="center",
+                      max_width=1180)
 
         remain = max(0, REVIEW_TIMEOUT - int(time.time() - self.state_time))
         draw_text(self.screen, f"{remain}초 후 자동 초기화",
-                  self.f_tiny, C_GRAY, SCREEN_W - 120, SCREEN_H - 34, anchor="center")
+                  self.f_tiny, C_GRAY, SCREEN_W - 120, SCREEN_H - 34,
+                  anchor="center", max_width=230)
         if remain <= 0:
             self._set_state(St.IDLE)
             self._reset_session()
@@ -1402,9 +1470,10 @@ class PhotoBooth:
     def _draw_status(self):
         self.screen.fill(C_BG)
         draw_text(self.screen, "운영 점검", self.f_big, C_PINK,
-                  SCREEN_W // 2, 90, anchor="center")
+                  SCREEN_W // 2, 90, anchor="center", max_width=900)
         draw_text(self.screen, "카메라 · 프린터 · QR · 저장공간 상태",
-                  self.f_medium, C_GRAY, SCREEN_W // 2, 178, anchor="center")
+                  self.f_medium, C_GRAY, SCREEN_W // 2, 178, anchor="center",
+                  max_width=1000)
 
         if not self.status_lines or time.time() - self.status_checked_at > 10:
             self._refresh_status()
@@ -1414,11 +1483,11 @@ class PhotoBooth:
             color = C_GREEN if ok else C_PINK
             draw_rrect(self.screen, C_WHITE, (360, y - 16, 1200, 78), radius=12)
             draw_text(self.screen, "정상" if ok else "확인", self.f_medium, color,
-                      430, y + 22, anchor="center")
+                      430, y + 22, anchor="center", max_width=115)
             draw_text(self.screen, title, self.f_medium, C_DARK,
-                      540, y + 2, anchor="topleft")
-            draw_text(self.screen, detail[:70], self.f_small, C_GRAY,
-                      760, y + 8, anchor="topleft")
+                      540, y + 2, anchor="topleft", max_width=190)
+            draw_text(self.screen, detail, self.f_small, C_GRAY,
+                      760, y + 8, anchor="topleft", max_width=760)
             y += 92
 
         self.btn_status_close.draw(self.screen, self.f_medium)
@@ -1430,13 +1499,16 @@ class PhotoBooth:
         if not self._print_done:
             dots = "." * (int(elapsed * 2) % 4)
             draw_text(self.screen, f"인쇄 중{dots}", self.f_big, C_PINK,
-                      SCREEN_W // 2, SCREEN_H // 2 - 60, anchor="center")
+                      SCREEN_W // 2, SCREEN_H // 2 - 60, anchor="center",
+                      max_width=1200)
             draw_text(self.screen, f"{self.print_copies}장 출력 요청 · CUPS 작업을 확인 중입니다",
                       self.f_medium, C_GRAY,
-                      SCREEN_W // 2, SCREEN_H // 2 + 40, anchor="center")
+                      SCREEN_W // 2, SCREEN_H // 2 + 40, anchor="center",
+                      max_width=1400)
             draw_text(self.screen, "프린터에서 용지가 움직이기 시작할 때까지 전원을 끄지 마세요",
                       self.f_small, C_GRAY,
-                      SCREEN_W // 2, SCREEN_H // 2 + 92, anchor="center")
+                      SCREEN_W // 2, SCREEN_H // 2 + 92, anchor="center",
+                      max_width=1400)
 
             # 프린터 아이콘 바운스
             bounce_y = int(math.sin(elapsed * 3) * 8)
@@ -1448,22 +1520,28 @@ class PhotoBooth:
             remain = max(0, PRINT_RESULT_TIMEOUT - int(done_elapsed))
             if self._print_ok:
                 draw_text(self.screen, "인쇄 완료!", self.f_big, C_GREEN,
-                          SCREEN_W // 2, SCREEN_H // 2 - 50, anchor="center")
+                          SCREEN_W // 2, SCREEN_H // 2 - 50, anchor="center",
+                          max_width=1200)
                 draw_text(self.screen, f"프린터에서 사진 {self.print_copies}장을 가져가세요",
                           self.f_large, C_DARK,
-                          SCREEN_W // 2, SCREEN_H // 2 + 50, anchor="center")
+                          SCREEN_W // 2, SCREEN_H // 2 + 50, anchor="center",
+                          max_width=1400)
                 draw_text(self.screen, f"{remain}초 후 대기 화면으로 돌아갑니다",
                           self.f_small, C_GRAY,
-                          SCREEN_W // 2, SCREEN_H // 2 + 120, anchor="center")
+                          SCREEN_W // 2, SCREEN_H // 2 + 120, anchor="center",
+                          max_width=1200)
             else:
                 draw_text(self.screen, "인쇄 오류", self.f_big, C_GRAY,
-                          SCREEN_W // 2, SCREEN_H // 2 - 50, anchor="center")
+                          SCREEN_W // 2, SCREEN_H // 2 - 50, anchor="center",
+                          max_width=1200)
                 draw_text(self.screen, "프린터 연결을 확인해 주세요",
                           self.f_large, C_DARK,
-                          SCREEN_W // 2, SCREEN_H // 2 + 50, anchor="center")
+                          SCREEN_W // 2, SCREEN_H // 2 + 50, anchor="center",
+                          max_width=1400)
                 draw_text(self.screen, f"{remain}초 후 리뷰 화면으로 돌아갑니다",
                           self.f_small, C_GRAY,
-                          SCREEN_W // 2, SCREEN_H // 2 + 120, anchor="center")
+                          SCREEN_W // 2, SCREEN_H // 2 + 120, anchor="center",
+                          max_width=1200)
 
             if done_elapsed >= PRINT_RESULT_TIMEOUT:
                 self._finish_print_result()
@@ -1477,7 +1555,7 @@ class PhotoBooth:
         remain  = max(0, QR_SHOW_TIMEOUT - int(elapsed))
 
         draw_text(self.screen, "QR 코드로 사진 받기", self.f_large, C_PINK,
-                  SCREEN_W // 2, 50, anchor="center")
+                  SCREEN_W // 2, 50, anchor="center", max_width=900)
 
         if self.qr_surface:
             qw, qh = self.qr_surface.get_size()
@@ -1492,19 +1570,19 @@ class PhotoBooth:
             draw_text(self.screen,
                       "같은 WiFi에 연결된 스마트폰으로 스캔하세요",
                       self.f_medium, C_DARK,
-                      SCREEN_W // 2, dy, anchor="center")
+                      SCREEN_W // 2, dy, anchor="center", max_width=1200)
             dy += 44
             draw_text(self.screen, "미리보기 화면에서 사진 다운로드 버튼을 누르세요",
                       self.f_small, C_DARK,
-                      SCREEN_W // 2, dy, anchor="center")
+                      SCREEN_W // 2, dy, anchor="center", max_width=1200)
             dy += 34
             draw_text(self.screen, self.qr_url, self.f_small, C_GRAY,
-                      SCREEN_W // 2, dy, anchor="center")
+                      SCREEN_W // 2, dy, anchor="center", max_width=1500)
             dy += 36
             draw_text(self.screen,
                       f"화면을 터치하면 바로 종료 · {remain}초 후 자동 복귀",
                       self.f_small, C_GRAY,
-                      SCREEN_W // 2, dy, anchor="center")
+                      SCREEN_W // 2, dy, anchor="center", max_width=1200)
 
         if elapsed >= QR_SHOW_TIMEOUT:
             self._set_state(St.IDLE)
