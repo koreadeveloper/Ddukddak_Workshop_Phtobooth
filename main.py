@@ -307,6 +307,10 @@ class PhotoBooth:
         self._compose_generation = 0
         self.status_lines = []
         self.status_checked_at = 0.0
+        self.selected_retake_index = 0
+        self.retake_index = None
+        self.review_notice = ""
+        self.review_notice_until = 0.0
         self._reset_session()
 
         # ── 상태 머신 ─────────────────────────────────
@@ -382,8 +386,11 @@ class PhotoBooth:
         by = SCREEN_H - 115
         self.btn_print  = Button(bx,            by, bw, bh, "인쇄하기",  C_PINK)
         self.btn_qr     = Button(bx + bw + gap, by, bw, bh, "QR 받기",  C_BLUE)
-        self.btn_retake = Button(bx+2*(bw+gap), by, bw, bh, "다시 찍기",
+        self.btn_retake = Button(bx+2*(bw+gap), by, bw, bh, "전체 다시 찍기",
                                  (110, 110, 120))
+        self.btn_retake_selected = Button(
+            700, 660, 316, 64, "선택 컷 다시 찍기", C_BLUE, radius=18
+        )
         self.btn_copies_minus = Button(1120, 760, 70, 58, "-", (110, 110, 120), radius=16)
         self.btn_copies_plus = Button(1490, 760, 70, 58, "+", C_BLUE, radius=16)
         self.btn_status_close = Button(
@@ -410,6 +417,10 @@ class PhotoBooth:
         self._print_done    = False
         self._print_ok      = False
         self.print_copies   = max(1, min(DEFAULT_PRINT_COPIES, MAX_PRINT_COPIES))
+        self.selected_retake_index = 0
+        self.retake_index = None
+        self.review_notice = ""
+        self.review_notice_until = 0.0
 
     def _set_capture_orientation(self, orientation: str):
         if orientation not in {"portrait", "landscape"}:
@@ -443,6 +454,27 @@ class PhotoBooth:
         if copies != self.print_copies:
             log.info(f"인쇄 매수 변경: {self.print_copies} → {copies}")
         self.print_copies = copies
+
+    def _set_review_notice(self, text: str, seconds: float = 3.5):
+        self.review_notice = text
+        self.review_notice_until = time.time() + seconds
+
+    def _review_thumb_rects(self):
+        tw, th = self._review_thumb_size()
+        gap    = 16
+        grid_x = 700
+        grid_y = 140
+        rects = []
+        for i in range(PHOTO_COUNT):
+            col = i % 2
+            row = i // 2
+            rects.append(pygame.Rect(
+                grid_x + col * (tw + gap),
+                grid_y + row * (th + gap),
+                tw,
+                th,
+            ))
+        return rects
 
     def _refresh_status(self):
         printer_ok, printer_text = printer.get_printer_status()
@@ -514,9 +546,20 @@ class PhotoBooth:
     # ─────────────────────────────────────────────────
     #  카운트다운 시작
     # ─────────────────────────────────────────────────
-    def _begin_countdown(self, new_session=True):
+    def _begin_countdown(self, new_session=True, retake_index=None):
         if new_session:
             self._reset_session()
+        if retake_index is not None:
+            if not 0 <= retake_index < len(self.captured_raw_bgr):
+                self._set_review_notice("다시 찍을 컷을 먼저 선택해 주세요.")
+                return
+            self.retake_index = retake_index
+            self.selected_retake_index = retake_index
+            log.info(f"{retake_index + 1}번 컷 재촬영 시작")
+        else:
+            self.retake_index = None
+        self.review_notice = ""
+        self.review_notice_until = 0.0
         self.cd_val    = COUNTDOWN_SECS
         self.cd_tick   = time.time()
         self.last_beep = COUNTDOWN_SECS + 1
@@ -530,9 +573,23 @@ class PhotoBooth:
         if frame is None:
             frame = np.zeros((CAM_H, CAM_W, 3), dtype=np.uint8)
         raw = self._oriented_frame(frame).copy()
-        self.captured_raw_bgr.append(raw)
-        self.captured_bgr.append(apply_filter(raw, self.selected_filter))
-        log.info(f"촬영 {len(self.captured_bgr)}/{PHOTO_COUNT}")
+        processed = apply_filter(raw, self.selected_filter)
+        if self.retake_index is not None:
+            idx = self.retake_index
+            self.captured_raw_bgr[idx] = raw
+            self.captured_bgr[idx] = processed
+            self.thumb_surfaces = []
+            self.strip_surface = None
+            self.strip_path = None
+            self.qr_surface = None
+            self.qr_url = ""
+            self._compose_generation += 1
+            self.retake_index = None
+            log.info(f"{idx + 1}번 컷 재촬영 완료")
+        else:
+            self.captured_raw_bgr.append(raw)
+            self.captured_bgr.append(processed)
+            log.info(f"촬영 {len(self.captured_bgr)}/{PHOTO_COUNT}")
 
     def _start_compose(self):
         """백그라운드 스레드로 스트립 합성"""
@@ -575,6 +632,18 @@ class PhotoBooth:
     # ─────────────────────────────────────────────────
     #  인쇄
     # ─────────────────────────────────────────────────
+    def _can_start_printing(self) -> bool:
+        if not self.strip_path or not self.strip_path.exists():
+            self._set_review_notice("사진 합성이 끝난 뒤 인쇄할 수 있습니다.")
+            return False
+
+        ok, detail = printer.get_printer_status()
+        if not ok:
+            log.warning(f"프린터 상태 확인 실패: {detail}")
+            self._set_review_notice("프린터 연결/등록을 확인하세요. 운영 점검에서 상태를 볼 수 있습니다.", 5.0)
+            return False
+        return True
+
     def _start_printing(self):
         self._print_done = False
         self._set_state(St.PRINTING)
@@ -598,11 +667,13 @@ class PhotoBooth:
     def _start_qr(self):
         if not self.strip_path or not self.strip_path.exists():
             log.error("스트립 파일 없음 - 합성 완료 전에 QR 요청됨")
+            self._set_review_notice("사진 합성이 끝난 뒤 QR을 만들 수 있습니다.")
             return
         if not self.qr_server.is_running:
             self.qr_server.start()
         if not self.qr_server.is_running:
             log.error("QR 서버가 실행 중이 아니어서 QR 화면을 열 수 없습니다")
+            self._set_review_notice("QR 서버를 시작하지 못했습니다. 운영 점검을 확인해 주세요.", 5.0)
             return
         surf, url = self.qr_server.make_qr_surface(self.session_id)
         self.qr_surface = surf
@@ -670,7 +741,7 @@ class PhotoBooth:
             for _, btn in self.filter_buttons:
                 btn.update(mpos, mpressed)
         elif self.state == St.REVIEW:
-            for btn in (self.btn_print, self.btn_qr, self.btn_retake):
+            for btn in (self.btn_print, self.btn_qr, self.btn_retake, self.btn_retake_selected):
                 btn.update(mpos, mpressed)
             for _, btn in self.review_frame_buttons:
                 btn.update(mpos, mpressed)
@@ -706,10 +777,16 @@ class PhotoBooth:
             self._begin_countdown()
 
         elif self.state == St.REVIEW:
+            for i, rect in enumerate(self._review_thumb_rects()):
+                if i < len(self.captured_raw_bgr) and rect.collidepoint(pos):
+                    self.selected_retake_index = i
+                    self._set_review_notice(f"{i + 1}번 컷이 선택되었습니다.")
+                    return
+
             for theme_id, btn in self.review_frame_buttons:
                 if btn.hit(pos):
                     if self._composing:
-                        log.info("합성 중 - 프레임 변경 대기")
+                        self._set_review_notice("사진 합성 중입니다. 잠시 후 다시 눌러 주세요.")
                         return
                     if self._set_frame_theme(theme_id):
                         self._recompose_current_session()
@@ -717,7 +794,7 @@ class PhotoBooth:
             for filter_id, btn in self.review_filter_buttons:
                 if btn.hit(pos):
                     if self._composing:
-                        log.info("합성 중 - 필터 변경 대기")
+                        self._set_review_notice("사진 합성 중입니다. 잠시 후 다시 눌러 주세요.")
                         return
                     if self._set_filter(filter_id):
                         self._recompose_current_session()
@@ -730,14 +807,21 @@ class PhotoBooth:
                 return
             if self.btn_print.hit(pos):
                 if self._composing:
-                    log.info("합성 중 - 인쇄 대기")
+                    self._set_review_notice("사진 합성 중입니다. 잠시 후 다시 눌러 주세요.")
+                    return
+                if not self._can_start_printing():
                     return
                 self._start_printing()
             elif self.btn_qr.hit(pos):
                 if self._composing:
-                    log.info("합성 중 - QR 대기")
+                    self._set_review_notice("사진 합성 중입니다. 잠시 후 다시 눌러 주세요.")
                     return
                 self._start_qr()
+            elif self.btn_retake_selected.hit(pos):
+                if self._composing:
+                    self._set_review_notice("사진 합성 중입니다. 잠시 후 다시 눌러 주세요.")
+                    return
+                self._begin_countdown(new_session=False, retake_index=self.selected_retake_index)
             elif self.btn_retake.hit(pos):
                 self._begin_countdown(new_session=True)
 
@@ -864,7 +948,10 @@ class PhotoBooth:
         bar.fill((0, 0, 0, 150))
         self.screen.blit(bar, (0, 0))
 
-        shot_label = f"{len(self.captured_bgr) + 1} / {PHOTO_COUNT}"
+        if self.retake_index is not None:
+            shot_label = f"{self.retake_index + 1}번 컷 다시 찍기"
+        else:
+            shot_label = f"{len(self.captured_bgr) + 1} / {PHOTO_COUNT}"
         draw_text(self.screen, shot_label, self.f_large, C_WHITE,
                   SCREEN_W // 2, 44, anchor="center")
 
@@ -967,35 +1054,33 @@ class PhotoBooth:
                       cx, cy, anchor="center")
 
         # ── 가운데: 4개 촬영 컷 ───────────────────────
-        tw, th = (150, 220) if self.capture_orientation == "portrait" else (230, 150)
-        gap    = 16
         grid_x = 700
-        grid_y = 140
+        rects = self._review_thumb_rects()
         draw_text(self.screen, "촬영 컷", self.f_medium, C_DARK,
                   grid_x, 96, anchor="topleft")
 
         if self.thumb_surfaces:
             for i, surf in enumerate(self.thumb_surfaces[:4]):
-                col = i % 2
-                row = i // 2
-                x   = grid_x + col * (tw + gap)
-                y   = grid_y + row * (th + gap)
-                draw_rrect(self.screen, C_LPINK,
-                           (x - 6, y - 6, tw + 12, th + 12), radius=12)
-                self.screen.blit(surf, (x, y))
+                rect = rects[i]
+                border_color = C_BLUE if i == self.selected_retake_index else C_LPINK
+                draw_rrect(self.screen, border_color,
+                           (rect.x - 7, rect.y - 7, rect.w + 14, rect.h + 14), radius=12)
+                self.screen.blit(surf, rect.topleft)
                 # 번호 뱃지
                 draw_rrect(self.screen, C_PINK,
-                           (x + 4, y + 4, 36, 36), radius=18)
+                           (rect.x + 4, rect.y + 4, 36, 36), radius=18)
                 draw_text(self.screen, str(i + 1), self.f_small, C_WHITE,
-                          x + 22, y + 22, anchor="center")
+                          rect.x + 22, rect.y + 22, anchor="center")
         else:
             # 썸네일 아직 없을 때 (빠르게 생성되므로 드뭄)
             for i in range(4):
-                col = i % 2
-                row = i // 2
-                x   = grid_x + col * (tw + gap)
-                y   = grid_y + row * (th + gap)
-                draw_rrect(self.screen, C_LGRAY, (x, y, tw, th), radius=12)
+                rect = rects[i]
+                border_color = C_BLUE if i == self.selected_retake_index else C_LGRAY
+                draw_rrect(self.screen, border_color, rect, radius=12)
+
+        draw_text(self.screen, "썸네일을 눌러 다시 찍을 컷을 고르세요.",
+                  self.f_tiny, C_GRAY, 858, 626, anchor="center")
+        self.btn_retake_selected.draw(self.screen, self.f_small)
 
         # ── 우측: 촬영 후 프레임/필터 선택 ─────────────
         draw_text(self.screen, "프레임 다시 선택", self.f_medium, C_DARK,
@@ -1024,14 +1109,18 @@ class PhotoBooth:
         for btn in (self.btn_print, self.btn_qr, self.btn_retake):
             btn.draw(self.screen, self.f_medium)
 
-        # 합성 중 출력/공유 버튼 딤처리
+        # 합성 중 출력/공유/재촬영 버튼 딤처리
         if self._composing:
-            for btn in (self.btn_print, self.btn_qr):
+            for btn in (self.btn_print, self.btn_qr, self.btn_retake_selected):
                 dim = pygame.Surface(
                     (btn.rect.width, btn.rect.height),
                     pygame.SRCALPHA)
                 dim.fill((180, 180, 180, 120))
                 self.screen.blit(dim, btn.rect.topleft)
+
+        if self.review_notice and time.time() < self.review_notice_until:
+            draw_text(self.screen, self.review_notice, self.f_small, C_PINK,
+                      SCREEN_W // 2, SCREEN_H - 138, anchor="center")
 
         remain = max(0, REVIEW_TIMEOUT - int(time.time() - self.state_time))
         draw_text(self.screen, f"{remain}초 후 자동 초기화",

@@ -20,7 +20,7 @@ sudo apt install -y git
 
 ```bash
 cd ~
-git clone https://github.com/youbin999/Ddukddak_Workshop_Phtobooth.git photobooth
+git clone https://github.com/koreadeveloper/Ddukddak_Workshop_Phtobooth.git photobooth
 cd ~/photobooth
 chmod +x install.sh run.sh
 ./install.sh
@@ -160,7 +160,39 @@ PHOTOBOOTH_REVIEW_TIMEOUT=120
 
 리뷰 화면에서는 인쇄 매수를 `1~PHOTOBOOTH_MAX_PRINT_COPIES` 범위에서 바꿀 수 있습니다. 손님이 리뷰 화면을 오래 방치하면 `PHOTOBOOTH_REVIEW_TIMEOUT`초 뒤 대기 화면으로 자동 복귀합니다. 시작 화면의 `운영 점검`에서는 카메라 프레임, CUPS 프린터 등록, QR 서버 주소, 저장공간을 확인할 수 있습니다.
 
-## 6. 부팅 자동 실행
+리뷰 화면의 촬영 컷 썸네일을 누르면 해당 컷이 선택됩니다. `선택 컷 다시 찍기`를 누르면 4장을 전부 다시 찍지 않고 선택한 컷만 새로 촬영한 뒤 최종 출력물을 다시 합성합니다. `전체 다시 찍기`는 현재 세션을 버리고 1번 컷부터 다시 시작합니다.
+
+프린터가 CUPS에 등록되어 있지 않거나 비활성 상태이면 인쇄 버튼을 눌러도 출력 화면으로 넘어가지 않고 리뷰 화면에 안내가 표시됩니다. 프린터 문제를 해결한 뒤 다시 `인쇄하기`를 누르세요.
+
+## 6. 기존 Pi에서 프로그램 업데이트
+
+이미 `~/photobooth`에 설치해 둔 상태에서 GitHub의 최신 수정본을 받으려면 다음 순서로 업데이트합니다.
+
+```bash
+cd ~/photobooth
+git status --short
+git stash push -m "backup pi local install changes" -- install.sh
+git pull origin main
+chmod +x install.sh run.sh
+git log --oneline -1
+```
+
+`git pull`에서 다른 파일 충돌이 나오면 그 파일도 로컬에서 바뀐 상태입니다. 직접 고친 내용이 아니라면 아래처럼 전체 백업 후 다시 받습니다.
+
+```bash
+git stash push -m "backup pi local changes"
+git pull origin main
+```
+
+업데이트 후 세로 방향 테스트:
+
+```bash
+./run.sh --window --no-audio --capture-orientation portrait --portrait-rotation counterclockwise
+```
+
+방향이 반대이면 `counterclockwise`를 `clockwise`로 바꿔 실행합니다.
+
+## 7. 부팅 자동 실행
 
 `Exec` 경로는 실제 저장소 위치에 맞추세요.
 
@@ -186,7 +218,7 @@ X-GNOME-Autostart-enabled=true
 sudo reboot
 ```
 
-## 7. 운영 주의사항
+## 8. 운영 주의사항
 
 - Pi 5는 정품 5V 5A 전원과 방열판/쿨러를 권장합니다. 전원 부족이면 웹캠, 프린터, USB가 불안정해질 수 있습니다.
 - CP1500은 USB 연결이 가장 단순합니다. Wi-Fi 프린팅은 네트워크 상태에 따라 지연/실패 원인이 늘어납니다.
@@ -195,7 +227,7 @@ sudo reboot
 - 오디오 장치가 없어도 앱은 무음으로 실행됩니다. 문제가 계속되면 `.env`에 `PHOTOBOOTH_AUDIO_ENABLED=0`을 넣으세요.
 - `photos/` 폴더에 출력 JPEG가 계속 쌓입니다. 장기 운영 전에는 저장 공간을 확인하세요.
 
-## 8. 문제 해결 명령
+## 9. 문제 해결 명령
 
 ```bash
 tail -f photobooth.log

@@ -11,6 +11,11 @@ log = logging.getLogger(__name__)
 
 def print_photo(file_path: Path, copies: int = 1) -> bool:
     """CUPS lp 명령으로 엽서 크기 출력"""
+    available, status = get_printer_status()
+    if not available:
+        log.error(f"인쇄 중단 - 프린터 상태 확인 필요: {status}")
+        return False
+
     copies = max(1, min(int(copies), cfg.MAX_PRINT_COPIES))
     cmd = [
         "lp",
@@ -48,12 +53,27 @@ def printer_available() -> bool:
 def get_printer_status() -> tuple[bool, str]:
     """CUPS에 등록된 프린터 상태를 반환합니다."""
     try:
-        result = subprocess.run(
+        printer_result = subprocess.run(
             ["lpstat", "-p", cfg.PRINTER_NAME],
             capture_output=True, text=True, timeout=5
         )
-        output = (result.stdout or result.stderr or "").strip()
-        return result.returncode == 0, output
+        printer_output = (printer_result.stdout or printer_result.stderr or "").strip()
+        if printer_result.returncode != 0:
+            return False, printer_output or f"{cfg.PRINTER_NAME} 프린터를 찾을 수 없습니다"
+
+        accept_result = subprocess.run(
+            ["lpstat", "-a", cfg.PRINTER_NAME],
+            capture_output=True, text=True, timeout=5
+        )
+        accept_output = (accept_result.stdout or accept_result.stderr or "").strip()
+        detail = " / ".join(part for part in (printer_output, accept_output) if part)
+        lower = detail.lower()
+        bad_terms = ("disabled", "not accepting", "paused", "stopped")
+        if accept_result.returncode != 0:
+            return False, detail or f"{cfg.PRINTER_NAME} 인쇄 대기열 상태를 확인할 수 없습니다"
+        if any(term in lower for term in bad_terms):
+            return False, detail
+        return True, detail
     except FileNotFoundError:
         return False, "lpstat 명령을 찾을 수 없습니다. CUPS 설치가 필요합니다."
     except Exception as e:
