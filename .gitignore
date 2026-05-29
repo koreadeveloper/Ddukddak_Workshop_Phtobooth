@@ -1,0 +1,21 @@
+# Local runtime configuration
+.env
+.env.backup.*
+
+# Python/cache files
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+
+# Photobooth runtime output
+photos/
+photobooth.log
+booth_stats.json
+*.tmp
+
+# Editor/OS noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
