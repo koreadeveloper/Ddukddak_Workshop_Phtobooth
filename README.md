@@ -1,13 +1,23 @@
-# Ddukddak_Workshop_Phtobooth
-뚝딱공방_4조 포토부스
+# 뚝딱 포토부스
 
+Raspberry Pi 5, Logitech USB 웹캠, Canon SELPHY CP1500 조합으로 동작하는 4컷 포토부스 프로그램입니다.
 
----
-바탕화면에서 우클릭 'open git bash here'
+주요 기능:
 
-git config --global user.name "깃허브닉네임"
-git config --global user.email "깃허브 메일"
+- 터치스크린 또는 마우스로 촬영 시작
+- 3초 카운트다운 후 4컷 촬영
+- 4컷 스트립 이미지 합성 및 JPEG 저장
+- CUPS를 통한 CP1500 엽서 출력
+- QR 코드로 같은 Wi-Fi의 스마트폰 다운로드
 
-git cloe 깃허브에서 코드 누르면 나오는 주소 복붙
-- shift + insert 붙여넣기
+## 빠른 실행
+
+```bash
+chmod +x install.sh run.sh
+./install.sh
+./run.sh --test --window
+./run.sh
+```
+
+라즈베리파이 설치, 프린터 등록, 자동 실행 설정은 [RASPBERRY_PI5_SETUP.md](RASPBERRY_PI5_SETUP.md)를 보세요.
 

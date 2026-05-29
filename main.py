@@ -25,6 +25,7 @@ import pygame
 import numpy as np
 
 # ─── 내부 모듈 ───────────────────────────────────────
+import config as cfg
 from config import *
 from camera import Camera, MockCamera
 import composer
@@ -181,14 +182,59 @@ class Particle:
 #  메인 애플리케이션
 # ════════════════════════════════════════════════════
 class PhotoBooth:
+    def _create_display(self):
+        flags = pygame.FULLSCREEN if FULLSCREEN else pygame.RESIZABLE
+        if FULLSCREEN and DISPLAY_AUTO_SIZE:
+            display_size = (0, 0)
+        elif FULLSCREEN:
+            display_size = (SCREEN_W, SCREEN_H)
+        else:
+            display_size = (min(SCREEN_W, WINDOW_W), min(SCREEN_H, WINDOW_H))
+
+        self.display = pygame.display.set_mode(display_size, flags)
+        self.screen = pygame.Surface((SCREEN_W, SCREEN_H)).convert()
+        self._update_display_transform()
+        pygame.display.set_caption("뚝딱 포토부스")
+
+    def _update_display_transform(self):
+        self.display_w, self.display_h = self.display.get_size()
+        self.ui_scale = min(self.display_w / SCREEN_W, self.display_h / SCREEN_H)
+        self.ui_scale = max(self.ui_scale, 0.01)
+        self.ui_w = max(1, int(SCREEN_W * self.ui_scale))
+        self.ui_h = max(1, int(SCREEN_H * self.ui_scale))
+        self.ui_x = (self.display_w - self.ui_w) // 2
+        self.ui_y = (self.display_h - self.ui_h) // 2
+        log.info(
+            f"디스플레이: actual={self.display_w}x{self.display_h}, "
+            f"ui={SCREEN_W}x{SCREEN_H}, scale={self.ui_scale:.3f}"
+        )
+
+    def _event_pos_to_ui(self, pos):
+        x = int((pos[0] - self.ui_x) / self.ui_scale)
+        y = int((pos[1] - self.ui_y) / self.ui_scale)
+        return x, y
+
+    def _present(self):
+        self.display.fill(C_BG)
+        if self.ui_w == SCREEN_W and self.ui_h == SCREEN_H:
+            scaled = self.screen
+        else:
+            scaled = pygame.transform.scale(self.screen, (self.ui_w, self.ui_h))
+        self.display.blit(scaled, (self.ui_x, self.ui_y))
+        pygame.display.flip()
+
     def __init__(self, test_mode: bool = False):
         pygame.init()
-        pygame.mixer.init(frequency=44100, size=-16, channels=2, buffer=512)
-        pygame.mouse.set_visible(False)
+        self.audio_enabled = False
+        if AUDIO_ENABLED:
+            try:
+                pygame.mixer.init(frequency=44100, size=-16, channels=2, buffer=512)
+                self.audio_enabled = True
+            except Exception as e:
+                log.warning(f"오디오 초기화 실패 - 무음으로 실행합니다: {e}")
+        pygame.mouse.set_visible(MOUSE_VISIBLE)
 
-        flags = pygame.FULLSCREEN if FULLSCREEN else 0
-        self.screen = pygame.display.set_mode((SCREEN_W, SCREEN_H), flags)
-        pygame.display.set_caption("뚝딱 포토부스")
+        self._create_display()
         self.clock = pygame.time.Clock()
 
         # ── 폰트 ──────────────────────────────────────
@@ -201,11 +247,15 @@ class PhotoBooth:
         self.f_tiny   = pygame.font.Font(fp, 18)
 
         # ── 사운드 ────────────────────────────────────
-        try:
-            self.snd_beep    = make_beep(880, 0.10)   # 카운트다운 삑
-            self.snd_shutter = make_beep(1200, 0.05)  # 찰칵
-            self.snd_done    = make_beep(660, 0.20)   # 완료
-        except Exception:
+        if self.audio_enabled:
+            try:
+                self.snd_beep    = make_beep(880, 0.10)   # 카운트다운 삑
+                self.snd_shutter = make_beep(1200, 0.05)  # 찰칵
+                self.snd_done    = make_beep(660, 0.20)   # 완료
+            except Exception as e:
+                log.warning(f"효과음 생성 실패 - 무음으로 실행합니다: {e}")
+                self.snd_beep = self.snd_shutter = self.snd_done = None
+        else:
             self.snd_beep = self.snd_shutter = self.snd_done = None
 
         # ── 카메라 ────────────────────────────────────
@@ -214,7 +264,7 @@ class PhotoBooth:
             globals()['cv2'] = _cv2
             self.camera = MockCamera(CAM_W, CAM_H)
         else:
-            self.camera = Camera(CAM_INDEX, CAM_W, CAM_H)
+            self.camera = Camera(CAM_INDEX, CAM_W, CAM_H, CAM_FPS, CAM_DEVICE)
         self.camera.start()
 
         # ── QR 서버 ───────────────────────────────────
@@ -250,13 +300,17 @@ class PhotoBooth:
         self.particles = [Particle() for _ in range(22)]
 
         # ── 버튼 (REVIEW 화면) ─────────────────────────
+        self.btn_start = Button(
+            SCREEN_W // 2 - 220, 405, 440, 92, "촬영 시작", C_PINK, radius=28
+        )
+
         bw, bh, gap = 330, 80, 36
         total = 3 * bw + 2 * gap
         bx = (SCREEN_W - total) // 2
         by = SCREEN_H - 115
-        self.btn_print  = Button(bx,            by, bw, bh, "🖨  인쇄하기",  C_PINK)
-        self.btn_qr     = Button(bx + bw + gap, by, bw, bh, "📱  QR 받기",  C_BLUE)
-        self.btn_retake = Button(bx+2*(bw+gap), by, bw, bh, "🔄  다시 찍기",
+        self.btn_print  = Button(bx,            by, bw, bh, "인쇄하기",  C_PINK)
+        self.btn_qr     = Button(bx + bw + gap, by, bw, bh, "QR 받기",  C_BLUE)
+        self.btn_retake = Button(bx+2*(bw+gap), by, bw, bh, "다시 찍기",
                                  (110, 110, 120))
 
         PHOTOS_DIR.mkdir(parents=True, exist_ok=True)
@@ -356,6 +410,14 @@ class PhotoBooth:
     #  QR
     # ─────────────────────────────────────────────────
     def _start_qr(self):
+        if not self.strip_path or not self.strip_path.exists():
+            log.error("스트립 파일 없음 - 합성 완료 전에 QR 요청됨")
+            return
+        if not self.qr_server.is_running:
+            self.qr_server.start()
+        if not self.qr_server.is_running:
+            log.error("QR 서버가 실행 중이 아니어서 QR 화면을 열 수 없습니다")
+            return
         surf, url = self.qr_server.make_qr_surface(self.session_id)
         self.qr_surface = surf
         self.qr_url     = url
@@ -366,12 +428,19 @@ class PhotoBooth:
     # ═══════════════════════════════════════════════
     def _handle_events(self) -> bool:
         """False 반환 시 종료"""
-        mpos    = pygame.mouse.get_pos()
+        mpos    = self._event_pos_to_ui(pygame.mouse.get_pos())
         mpressed = pygame.mouse.get_pressed()[0]
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 return False
+
+            if event.type == pygame.VIDEORESIZE and not FULLSCREEN:
+                self.display = pygame.display.set_mode(
+                    (max(640, event.w), max(360, event.h)), pygame.RESIZABLE
+                )
+                self._update_display_transform()
+                continue
 
             # ── 키보드 ────────────────────────────────
             if event.type == pygame.KEYDOWN:
@@ -394,12 +463,14 @@ class PhotoBooth:
                 else:
                     if event.button != 1:
                         continue
-                    pos = event.pos
+                    pos = self._event_pos_to_ui(event.pos)
 
                 self._handle_click(pos)
 
         # 버튼 hover 업데이트
-        if self.state == St.REVIEW:
+        if self.state == St.IDLE:
+            self.btn_start.update(mpos, mpressed)
+        elif self.state == St.REVIEW:
             for btn in (self.btn_print, self.btn_qr, self.btn_retake):
                 btn.update(mpos, mpressed)
 
@@ -416,6 +487,9 @@ class PhotoBooth:
                     return
                 self._start_printing()
             elif self.btn_qr.hit(pos):
+                if self._composing:
+                    log.info("합성 중 - QR 대기")
+                    return
                 self._start_qr()
             elif self.btn_retake.hit(pos):
                 self._begin_countdown(new_session=True)
@@ -439,31 +513,33 @@ class PhotoBooth:
             p.draw(self.screen)
 
         # 메인 타이틀
-        draw_text(self.screen, "뚝딱 포토부스", self.f_big, C_PINK,
-                  SCREEN_W // 2, 220, anchor="center",
+        draw_text(self.screen, "오늘의 네컷", self.f_big, C_PINK,
+                  SCREEN_W // 2, 190, anchor="center",
                   shadow=True, shadow_color=C_LPINK, shadow_off=4)
 
-        draw_text(self.screen, "4컷 · 인쇄 · QR 공유", self.f_medium, C_GRAY,
-                  SCREEN_W // 2, 330, anchor="center")
+        draw_text(self.screen, "뚝딱 공방 포토부스", self.f_medium, C_GRAY,
+                  SCREEN_W // 2, 300, anchor="center")
 
-        # 깜빡이는 안내
+        self.btn_start.draw(self.screen, self.f_large)
+
         if int(time.time() * 1.6) % 2:
-            draw_text(self.screen, "화면을 터치하거나 아무 키나 누르세요",
-                      self.f_large, C_DARK,
-                      SCREEN_W // 2, 450, anchor="center")
+            draw_text(self.screen, "터치 또는 클릭으로 시작",
+                      self.f_small, C_GRAY,
+                      SCREEN_W // 2, 515, anchor="center")
 
         # 카메라 소형 미리보기
         frame = self.camera.get_frame()
         if frame is not None:
             pw, ph = 340, 192
             prev = bgr_to_surface(frame, (pw, ph))
-            prev = pygame.transform.flip(prev, True, False)
+            if PREVIEW_MIRROR:
+                prev = pygame.transform.flip(prev, True, False)
             px = SCREEN_W // 2 - pw // 2
             py = 560
             draw_rrect(self.screen, C_LPINK,
                        (px - 6, py - 6, pw + 12, ph + 12), radius=14)
             self.screen.blit(prev, (px, py))
-            draw_text(self.screen, "지금 모습이에요 😊", self.f_small, C_GRAY,
+            draw_text(self.screen, "지금 모습이에요", self.f_small, C_GRAY,
                       SCREEN_W // 2, py + ph + 14, anchor="center")
 
         # 하단 정보
@@ -498,7 +574,8 @@ class PhotoBooth:
         frame = self.camera.get_frame()
         if frame is not None:
             prev = bgr_to_surface(frame, (SCREEN_W, SCREEN_H))
-            prev = pygame.transform.flip(prev, True, False)
+            if PREVIEW_MIRROR:
+                prev = pygame.transform.flip(prev, True, False)
             self.screen.blit(prev, (0, 0))
         else:
             self.screen.fill((20, 20, 30))
@@ -508,7 +585,7 @@ class PhotoBooth:
         bar.fill((0, 0, 0, 150))
         self.screen.blit(bar, (0, 0))
 
-        shot_label = f"📷  {len(self.captured_bgr) + 1}  /  {PHOTO_COUNT}"
+        shot_label = f"{len(self.captured_bgr) + 1} / {PHOTO_COUNT}"
         draw_text(self.screen, shot_label, self.f_large, C_WHITE,
                   SCREEN_W // 2, 44, anchor="center")
 
@@ -554,7 +631,8 @@ class PhotoBooth:
         frame = self.camera.get_frame()
         if frame is not None:
             prev = bgr_to_surface(frame, (SCREEN_W, SCREEN_H))
-            prev = pygame.transform.flip(prev, True, False)
+            if PREVIEW_MIRROR:
+                prev = pygame.transform.flip(prev, True, False)
             self.screen.blit(prev, (0, 0))
         else:
             self.screen.fill((20, 20, 30))
@@ -590,7 +668,7 @@ class PhotoBooth:
     def _draw_review(self):
         self.screen.fill(C_BG)
 
-        draw_text(self.screen, "사진이 완성됐어요! 🎉", self.f_large, C_PINK,
+        draw_text(self.screen, "사진이 완성됐어요!", self.f_large, C_PINK,
                   SCREEN_W // 2, 44, anchor="center")
 
         # ── 좌측: 4개 썸네일 그리드 ──────────────────
@@ -645,13 +723,14 @@ class PhotoBooth:
         for btn in (self.btn_print, self.btn_qr, self.btn_retake):
             btn.draw(self.screen, self.f_medium)
 
-        # 합성 중 인쇄 버튼 딤처리
+        # 합성 중 출력/공유 버튼 딤처리
         if self._composing:
-            dim = pygame.Surface(
-                (self.btn_print.rect.width, self.btn_print.rect.height),
-                pygame.SRCALPHA)
-            dim.fill((180, 180, 180, 120))
-            self.screen.blit(dim, self.btn_print.rect.topleft)
+            for btn in (self.btn_print, self.btn_qr):
+                dim = pygame.Surface(
+                    (btn.rect.width, btn.rect.height),
+                    pygame.SRCALPHA)
+                dim.fill((180, 180, 180, 120))
+                self.screen.blit(dim, btn.rect.topleft)
 
     # ═══════════════════════════════════════════════
     #  PRINTING 렌더링
@@ -662,25 +741,25 @@ class PhotoBooth:
 
         if not self._print_done:
             dots = "." * (int(elapsed * 2) % 4)
-            draw_text(self.screen, f"🖨  인쇄 중{dots}", self.f_big, C_PINK,
+            draw_text(self.screen, f"인쇄 중{dots}", self.f_big, C_PINK,
                       SCREEN_W // 2, SCREEN_H // 2 - 60, anchor="center")
             draw_text(self.screen, "잠시만 기다려 주세요", self.f_medium, C_GRAY,
                       SCREEN_W // 2, SCREEN_H // 2 + 40, anchor="center")
 
             # 프린터 아이콘 바운스
             bounce_y = int(math.sin(elapsed * 3) * 8)
-            icon = self.f_huge.render("🖨", True, C_LPINK)
+            icon = self.f_huge.render("PRINT", True, C_LPINK)
             self.screen.blit(icon, icon.get_rect(
                 center=(SCREEN_W // 2, SCREEN_H // 2 - 200 + bounce_y)))
         else:
             if self._print_ok:
-                draw_text(self.screen, "✅  인쇄 완료!", self.f_big, C_GREEN,
+                draw_text(self.screen, "인쇄 완료!", self.f_big, C_GREEN,
                           SCREEN_W // 2, SCREEN_H // 2 - 50, anchor="center")
-                draw_text(self.screen, "프린터에서 사진을 가져가세요 😊",
+                draw_text(self.screen, "프린터에서 사진을 가져가세요",
                           self.f_large, C_DARK,
                           SCREEN_W // 2, SCREEN_H // 2 + 50, anchor="center")
             else:
-                draw_text(self.screen, "⚠  인쇄 오류", self.f_big, C_GRAY,
+                draw_text(self.screen, "인쇄 오류", self.f_big, C_GRAY,
                           SCREEN_W // 2, SCREEN_H // 2 - 50, anchor="center")
                 draw_text(self.screen, "프린터 연결을 확인해 주세요",
                           self.f_large, C_DARK,
@@ -705,7 +784,7 @@ class PhotoBooth:
         elapsed = time.time() - self.state_time
         remain  = max(0, QR_SHOW_TIMEOUT - int(elapsed))
 
-        draw_text(self.screen, "📱  QR 코드로 사진 받기", self.f_large, C_PINK,
+        draw_text(self.screen, "QR 코드로 사진 받기", self.f_large, C_PINK,
                   SCREEN_W // 2, 50, anchor="center")
 
         if self.qr_surface:
@@ -771,7 +850,7 @@ class PhotoBooth:
             elif self.state == St.QR_SHOW:
                 self._draw_qr()
 
-            pygame.display.flip()
+            self._present()
             self.clock.tick(FPS)
 
         # ── 정리 ──────────────────────────────────────
@@ -784,17 +863,54 @@ class PhotoBooth:
 # ════════════════════════════════════════════════════
 #  진입점
 # ════════════════════════════════════════════════════
+def _set_runtime_value(name: str, value):
+    setattr(cfg, name, value)
+    globals()[name] = value
+
+
 def main():
     parser = argparse.ArgumentParser(description="뚝딱 포토부스")
     parser.add_argument("--test", action="store_true",
                         help="카메라 없이 테스트 모드 실행")
     parser.add_argument("--window", action="store_true",
                         help="창 모드로 실행 (디버그용)")
+    parser.add_argument("--fullscreen", action="store_true",
+                        help="전체화면으로 실행")
+    parser.add_argument("--camera-index", type=int,
+                        help="OpenCV 카메라 번호 (/dev/video0이면 0)")
+    parser.add_argument("--camera-device",
+                        help="카메라 장치 경로 예: /dev/video0")
+    parser.add_argument("--printer",
+                        help="CUPS 프린터 이름 예: Canon_CP1500")
+    parser.add_argument("--qr-port", type=int,
+                        help="QR 다운로드 서버 포트")
+    parser.add_argument("--no-audio", action="store_true",
+                        help="효과음 없이 실행")
+    cursor = parser.add_mutually_exclusive_group()
+    cursor.add_argument("--show-cursor", action="store_true",
+                        help="마우스 커서 표시")
+    cursor.add_argument("--hide-cursor", action="store_true",
+                        help="마우스 커서 숨김")
     args = parser.parse_args()
 
     if args.window:
-        import config as _cfg
-        _cfg.FULLSCREEN = False
+        _set_runtime_value("FULLSCREEN", False)
+    if args.fullscreen:
+        _set_runtime_value("FULLSCREEN", True)
+    if args.camera_index is not None:
+        _set_runtime_value("CAM_INDEX", args.camera_index)
+    if args.camera_device:
+        _set_runtime_value("CAM_DEVICE", args.camera_device)
+    if args.printer:
+        _set_runtime_value("PRINTER_NAME", args.printer)
+    if args.qr_port is not None:
+        _set_runtime_value("QR_SERVER_PORT", args.qr_port)
+    if args.no_audio:
+        _set_runtime_value("AUDIO_ENABLED", False)
+    if args.show_cursor:
+        _set_runtime_value("MOUSE_VISIBLE", True)
+    if args.hide_cursor:
+        _set_runtime_value("MOUSE_VISIBLE", False)
 
     try:
         booth = PhotoBooth(test_mode=args.test)

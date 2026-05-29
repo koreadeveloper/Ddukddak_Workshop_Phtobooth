@@ -4,7 +4,7 @@ import subprocess
 import logging
 from pathlib import Path
 
-from config import PRINTER_NAME
+import config as cfg
 
 log = logging.getLogger(__name__)
 
@@ -13,9 +13,10 @@ def print_photo(file_path: Path) -> bool:
     """CUPS lp 명령으로 엽서 크기 출력"""
     cmd = [
         "lp",
-        "-d", PRINTER_NAME,
+        "-d", cfg.PRINTER_NAME,
         "-n", "1",
         "-o", "media=Postcard",
+        "-o", "PageSize=Postcard",
         "-o", "fit-to-page",
         "-o", "ColorModel=RGB",
         str(file_path),
@@ -40,11 +41,19 @@ def print_photo(file_path: Path) -> bool:
 
 def printer_available() -> bool:
     """프린터 연결 여부 확인"""
+    return bool(get_printer_status()[0])
+
+
+def get_printer_status() -> tuple[bool, str]:
+    """CUPS에 등록된 프린터 상태를 반환합니다."""
     try:
         result = subprocess.run(
-            ["lpstat", "-p", PRINTER_NAME],
+            ["lpstat", "-p", cfg.PRINTER_NAME],
             capture_output=True, text=True, timeout=5
         )
-        return result.returncode == 0
-    except Exception:
-        return False
+        output = (result.stdout or result.stderr or "").strip()
+        return result.returncode == 0, output
+    except FileNotFoundError:
+        return False, "lpstat 명령을 찾을 수 없습니다. CUPS 설치가 필요합니다."
+    except Exception as e:
+        return False, f"프린터 상태 확인 실패: {e}"

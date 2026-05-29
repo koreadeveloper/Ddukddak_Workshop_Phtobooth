@@ -1,17 +1,49 @@
 # -*- coding: utf-8 -*-
 """뚝딱 포토부스 - 설정 파일"""
+import os
 from pathlib import Path
 
+
+def _env_bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _env_int(name: str, default: int) -> int:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return default
+
+
 # ─── 화면 ────────────────────────────────────────────
-SCREEN_W   = 1920
-SCREEN_H   = 1080
-FPS        = 60
-FULLSCREEN = True
+SCREEN_W   = _env_int("PHOTOBOOTH_SCREEN_W", 1920)
+SCREEN_H   = _env_int("PHOTOBOOTH_SCREEN_H", 1080)
+WINDOW_W   = _env_int("PHOTOBOOTH_WINDOW_W", 1280)
+WINDOW_H   = _env_int("PHOTOBOOTH_WINDOW_H", 720)
+FPS        = _env_int("PHOTOBOOTH_FPS", 60)
+FULLSCREEN = _env_bool("PHOTOBOOTH_FULLSCREEN", True)
+
+# 실제 디스플레이 해상도는 Pi/모니터마다 다르므로, 기본 UI는 1920x1080으로
+# 그리고 출력 단계에서 화면에 맞게 스케일링합니다.
+DISPLAY_AUTO_SIZE = _env_bool("PHOTOBOOTH_DISPLAY_AUTO_SIZE", True)
+MOUSE_VISIBLE     = _env_bool("PHOTOBOOTH_MOUSE_VISIBLE", True)
+AUDIO_ENABLED     = _env_bool("PHOTOBOOTH_AUDIO_ENABLED", True)
 
 # ─── 카메라 ──────────────────────────────────────────
-CAM_INDEX = 0
-CAM_W     = 1280
-CAM_H     = 720
+CAM_INDEX  = _env_int("PHOTOBOOTH_CAM_INDEX", 0)
+CAM_DEVICE = os.getenv("PHOTOBOOTH_CAM_DEVICE", "").strip()
+CAM_W      = _env_int("PHOTOBOOTH_CAM_W", 1280)
+CAM_H      = _env_int("PHOTOBOOTH_CAM_H", 720)
+CAM_FPS    = _env_int("PHOTOBOOTH_CAM_FPS", 30)
+
+# 화면 미리보기는 거울처럼 보여 주되, 저장/인쇄 이미지는 실제 카메라 방향을 유지합니다.
+PREVIEW_MIRROR = _env_bool("PHOTOBOOTH_PREVIEW_MIRROR", True)
 
 # ─── 촬영 흐름 ───────────────────────────────────────
 PHOTO_COUNT      = 4     # 한 세션에 찍을 장수
@@ -20,10 +52,10 @@ SHOT_DELAY       = 1.2   # 찰칵 후 다음 카운트 전 대기(초)
 QR_SHOW_TIMEOUT  = 30    # QR 화면 자동 복귀(초)
 
 # ─── 인쇄 ────────────────────────────────────────────
-PRINTER_NAME = "Canon_CP1500"   # CUPS 프린터 이름
+PRINTER_NAME = os.getenv("PHOTOBOOTH_PRINTER_NAME", "Canon_CP1500")
 
 # ─── QR 공유 서버 ─────────────────────────────────────
-QR_SERVER_PORT = 8080
+QR_SERVER_PORT = _env_int("PHOTOBOOTH_QR_PORT", 8080)
 
 # ─── 경로 ────────────────────────────────────────────
 BASE_DIR   = Path(__file__).parent
