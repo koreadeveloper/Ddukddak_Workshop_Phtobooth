@@ -33,6 +33,7 @@ import composer
 from qr_share import QRServer, get_local_ip
 import printer
 from effects import FILTERS, apply_filter
+import booth_stats
 
 # ─── 로깅 설정 ──────────────────────────────────────
 logging.basicConfig(
@@ -317,6 +318,7 @@ class PhotoBooth:
         self.review_notice_until = 0.0
         self.cleanup_summary = "정리 전"
         self.cleanup_checked_at = 0.0
+        self.session_counted = False
         self._reset_session()
 
         # ── 상태 머신 ─────────────────────────────────
@@ -440,6 +442,7 @@ class PhotoBooth:
         self.retake_index = None
         self.review_notice = ""
         self.review_notice_until = 0.0
+        self.session_counted = False
 
     def _set_capture_orientation(self, orientation: str):
         if orientation not in {"portrait", "landscape"}:
@@ -629,12 +632,21 @@ class PhotoBooth:
             f"재연결 {camera_health['reconnects']}회"
         )
         qr_text = f"QR 서버: http://{get_local_ip()}:{QR_SERVER_PORT}"
+        stats = booth_stats.summary()
+        today = stats["today"]
+        total_stats = stats["total"]
+        stats_text = (
+            f"오늘 촬영 {today['sessions']}회 · 인쇄 {today['print_success']}회 "
+            f"(실패 {today['print_failure']}회) · QR {today['qr_downloads']}회 / "
+            f"전체 촬영 {total_stats['sessions']}회"
+        )
         self.status_lines = [
             ("카메라", camera_text, camera_health["ok"]),
             ("프린터", printer_text or PRINTER_NAME, printer_ok),
             ("QR", qr_text, self.qr_server.is_running),
             ("저장공간", f"여유 {free // (1024 ** 3)}GB / 전체 {total // (1024 ** 3)}GB", free > 1024 ** 3),
             ("사진 폴더", f"{photos_count}개 JPG 저장됨", True),
+            ("오늘 운영", stats_text, True),
             ("보관 정리", self.cleanup_summary, True),
         ]
         self.status_checked_at = time.time()
@@ -833,6 +845,9 @@ class PhotoBooth:
                 if generation == self._compose_generation:
                     self.strip_path = strip_path
                     self.strip_surface = strip_surface
+                    if not self.session_counted:
+                        booth_stats.increment("sessions")
+                        self.session_counted = True
                     self._cleanup_old_photos()
             except Exception as e:
                 log.error(f"합성 오류: {e}")
@@ -871,6 +886,7 @@ class PhotoBooth:
             self._print_ok   = ok
             self._print_done = True
             self._print_done_at = time.time()
+            booth_stats.increment("print_success" if ok else "print_failure")
             if self.snd_done and ok:
                 self.snd_done.play()
 
@@ -901,6 +917,7 @@ class PhotoBooth:
         surf, url = self.qr_server.make_qr_surface(self.session_id)
         self.qr_surface = surf
         self.qr_url     = url
+        booth_stats.increment("qr_shown")
         self._set_state(St.QR_SHOW)
 
     # ═══════════════════════════════════════════════

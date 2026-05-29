@@ -13,6 +13,7 @@ import numpy as np
 import logging
 
 import config as cfg
+import booth_stats
 
 log = logging.getLogger(__name__)
 
@@ -172,6 +173,7 @@ class _PhotoHandler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+        booth_stats.increment("qr_page_views")
         log.info(f"QR 모바일 페이지 열림: {sid}")
 
     def _send_jpeg(self, sid: str, path, attachment: bool):
@@ -187,6 +189,8 @@ class _PhotoHandler(http.server.BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(data)
+        if attachment:
+            booth_stats.increment("qr_downloads")
         log.info(f"사진 {'다운로드' if attachment else '미리보기'}: {sid}")
 
     def log_message(self, fmt, *args):

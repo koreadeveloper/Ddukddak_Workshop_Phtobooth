@@ -11,6 +11,7 @@ import subprocess
 import sys
 
 import config as cfg
+import booth_stats
 
 
 def _ok(message: str):
@@ -148,6 +149,18 @@ def check_storage() -> bool:
     return False
 
 
+def check_stats() -> bool:
+    stats = booth_stats.summary()
+    today = stats["today"]
+    _ok(
+        "운영 통계: "
+        f"오늘 촬영 {today['sessions']}회, "
+        f"인쇄 성공 {today['print_success']}회, "
+        f"QR 다운로드 {today['qr_downloads']}회"
+    )
+    return True
+
+
 def main() -> int:
     print("뚝딱 포토부스 Pi 점검")
     print(f"Python: {sys.version.split()[0]}")
@@ -158,6 +171,7 @@ def main() -> int:
         check_printer(),
         check_qr_port(),
         check_storage(),
+        check_stats(),
     ]
     if all(checks):
         _ok("전체 점검 통과")
