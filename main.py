@@ -301,6 +301,7 @@ class PhotoBooth:
             DEFAULT_FRAME_THEME if DEFAULT_FRAME_THEME in composer.FRAME_THEMES
             else "soft_pink"
         )
+        self._compose_generation = 0
         self._reset_session()
 
         # ── 상태 머신 ─────────────────────────────────
@@ -352,6 +353,20 @@ class PhotoBooth:
             self.filter_buttons.append(
                 (filter_id, Button(x, y, 150, 56, meta["name"], (110, 110, 120), radius=18))
             )
+        self.review_frame_buttons = []
+        for i, (theme_id, theme) in enumerate(composer.FRAME_THEMES.items()):
+            x = 1120 + (i % 2) * 220
+            y = 170 + (i // 2) * 68
+            self.review_frame_buttons.append(
+                (theme_id, Button(x, y, 200, 52, theme["name"], (110, 110, 120), radius=16))
+            )
+        self.review_filter_buttons = []
+        for i, (filter_id, meta) in enumerate(FILTERS.items()):
+            x = 1120 + (i % 2) * 220
+            y = 480 + (i // 2) * 64
+            self.review_filter_buttons.append(
+                (filter_id, Button(x, y, 200, 50, meta["name"], (110, 110, 120), radius=16))
+            )
 
         bw, bh, gap = 330, 80, 36
         total = 3 * bw + 2 * gap
@@ -370,6 +385,7 @@ class PhotoBooth:
     # ─────────────────────────────────────────────────
     def _reset_session(self):
         self.session_id     = str(uuid.uuid4())[:8]
+        self.captured_raw_bgr = []      # 방향만 보정된 원본 BGR ndarray 목록
         self.captured_bgr   = []        # BGR ndarray 목록
         self.strip_path     = None
         self.strip_surface  = None
@@ -377,6 +393,7 @@ class PhotoBooth:
         self.qr_surface     = None
         self.qr_url         = ""
         self._composing     = False
+        self._compose_generation += 1
         self._print_done    = False
         self._print_ok      = False
 
@@ -389,17 +406,23 @@ class PhotoBooth:
 
     def _set_frame_theme(self, theme_id: str):
         if theme_id not in composer.FRAME_THEMES:
-            return
+            return False
         if self.selected_frame_theme != theme_id:
             log.info(f"프레임 변경: {self.selected_frame_theme} → {theme_id}")
+            self.selected_frame_theme = theme_id
+            return True
         self.selected_frame_theme = theme_id
+        return False
 
     def _set_filter(self, filter_id: str):
         if filter_id not in FILTERS:
-            return
+            return False
         if self.selected_filter != filter_id:
             log.info(f"필터 변경: {self.selected_filter} → {filter_id}")
+            self.selected_filter = filter_id
+            return True
         self.selected_filter = filter_id
+        return False
 
     def _oriented_frame(self, frame: np.ndarray) -> np.ndarray:
         """촬영/출력용 프레임 방향을 적용합니다."""
@@ -424,8 +447,25 @@ class PhotoBooth:
 
     def _review_thumb_size(self) -> tuple[int, int]:
         if self.capture_orientation == "portrait":
-            return 255, 370
-        return 370, 255
+            return 150, 220
+        return 230, 150
+
+    def _refresh_processed_photos(self):
+        self.captured_bgr = [
+            apply_filter(raw, self.selected_filter)
+            for raw in self.captured_raw_bgr
+        ]
+        self.thumb_surfaces = []
+        self.strip_surface = None
+        self.strip_path = None
+        self.qr_surface = None
+        self.qr_url = ""
+
+    def _recompose_current_session(self):
+        if len(self.captured_raw_bgr) != PHOTO_COUNT or self._composing:
+            return
+        self._refresh_processed_photos()
+        self._start_compose()
 
     # ─────────────────────────────────────────────────
     #  상태 전환
@@ -453,34 +493,46 @@ class PhotoBooth:
         frame = self.camera.get_frame()
         if frame is None:
             frame = np.zeros((CAM_H, CAM_W, 3), dtype=np.uint8)
-        self.captured_bgr.append(self._processed_frame(frame).copy())
+        raw = self._oriented_frame(frame).copy()
+        self.captured_raw_bgr.append(raw)
+        self.captured_bgr.append(apply_filter(raw, self.selected_filter))
         log.info(f"촬영 {len(self.captured_bgr)}/{PHOTO_COUNT}")
 
     def _start_compose(self):
         """백그라운드 스레드로 스트립 합성"""
+        if self._composing:
+            return
         self._composing = True
+        self._compose_generation += 1
+        generation = self._compose_generation
+        photos = [p.copy() for p in self.captured_bgr]
+        session_id = self.session_id
+        frame_theme = self.selected_frame_theme
 
         def _work():
             try:
                 # 썸네일 (빠름)
                 surfs = []
                 thumb_w, thumb_h = self._review_thumb_size()
-                for bgr in self.captured_bgr:
+                for bgr in photos:
                     surfs.append(bgr_to_surface(bgr, (thumb_w, thumb_h)))
-                self.thumb_surfaces = surfs
+                if generation == self._compose_generation:
+                    self.thumb_surfaces = surfs
 
                 # 풀 스트립 저장
-                self.strip_path = composer.compose_print_image(
-                    self.captured_bgr, self.session_id, self.selected_frame_theme)
+                strip_path = composer.compose_print_image(photos, session_id, frame_theme)
 
                 # 미리보기 Surface
-                preview = composer.make_preview_image(
-                    self.captured_bgr, 820, self.selected_frame_theme)
-                self.strip_surface = pil_to_surface(preview)
+                preview = composer.make_preview_image(photos, 820, frame_theme)
+                strip_surface = pil_to_surface(preview)
+                if generation == self._compose_generation:
+                    self.strip_path = strip_path
+                    self.strip_surface = strip_surface
             except Exception as e:
                 log.error(f"합성 오류: {e}")
             finally:
-                self._composing = False
+                if generation == self._compose_generation:
+                    self._composing = False
 
         threading.Thread(target=_work, daemon=True, name="composer").start()
 
@@ -577,6 +629,10 @@ class PhotoBooth:
         elif self.state == St.REVIEW:
             for btn in (self.btn_print, self.btn_qr, self.btn_retake):
                 btn.update(mpos, mpressed)
+            for _, btn in self.review_frame_buttons:
+                btn.update(mpos, mpressed)
+            for _, btn in self.review_filter_buttons:
+                btn.update(mpos, mpressed)
 
         return True
 
@@ -599,6 +655,22 @@ class PhotoBooth:
             self._begin_countdown()
 
         elif self.state == St.REVIEW:
+            for theme_id, btn in self.review_frame_buttons:
+                if btn.hit(pos):
+                    if self._composing:
+                        log.info("합성 중 - 프레임 변경 대기")
+                        return
+                    if self._set_frame_theme(theme_id):
+                        self._recompose_current_session()
+                    return
+            for filter_id, btn in self.review_filter_buttons:
+                if btn.hit(pos):
+                    if self._composing:
+                        log.info("합성 중 - 필터 변경 대기")
+                        return
+                    if self._set_filter(filter_id):
+                        self._recompose_current_session()
+                    return
             if self.btn_print.hit(pos):
                 if self._composing:
                     log.info("합성 중 - 인쇄 대기")
@@ -814,14 +886,31 @@ class PhotoBooth:
     def _draw_review(self):
         self.screen.fill(C_BG)
 
-        draw_text(self.screen, "사진이 완성됐어요!", self.f_large, C_PINK,
+        draw_text(self.screen, "최종 사진 확인", self.f_large, C_PINK,
                   SCREEN_W // 2, 44, anchor="center")
 
-        # ── 좌측: 4개 썸네일 그리드 ──────────────────
-        tw, th = self._review_thumb_size()
-        gap    = 18
-        grid_x = 80
-        grid_y = 110
+        # ── 좌측: 최종 출력 미리보기 ──────────────────
+        preview_x = 80
+        preview_y = 110
+        if self.strip_surface:
+            sw, sh = self.strip_surface.get_size()
+            draw_rrect(self.screen, C_LPINK,
+                       (preview_x - 10, preview_y - 10, sw + 20, sh + 20), radius=14)
+            self.screen.blit(self.strip_surface, (preview_x, preview_y))
+        else:
+            cx = preview_x + 280
+            cy = SCREEN_H // 2 - 60
+            dots = "." * (int(time.time() * 2.5) % 4)
+            draw_text(self.screen, f"합성 중{dots}", self.f_medium, C_GRAY,
+                      cx, cy, anchor="center")
+
+        # ── 가운데: 4개 촬영 컷 ───────────────────────
+        tw, th = (150, 220) if self.capture_orientation == "portrait" else (230, 150)
+        gap    = 16
+        grid_x = 700
+        grid_y = 140
+        draw_text(self.screen, "촬영 컷", self.f_medium, C_DARK,
+                  grid_x, 96, anchor="topleft")
 
         if self.thumb_surfaces:
             for i, surf in enumerate(self.thumb_surfaces[:4]):
@@ -846,24 +935,21 @@ class PhotoBooth:
                 y   = grid_y + row * (th + gap)
                 draw_rrect(self.screen, C_LGRAY, (x, y, tw, th), radius=12)
 
-        # ── 우측: 스트립 미리보기 ─────────────────────
-        strip_area_x = grid_x + 2 * (tw + gap) + 50
-        strip_area_w = SCREEN_W - strip_area_x - 30
+        # ── 우측: 촬영 후 프레임/필터 선택 ─────────────
+        draw_text(self.screen, "프레임 다시 선택", self.f_medium, C_DARK,
+                  1120, 126, anchor="topleft")
+        self._draw_selected_button_group(
+            self.selected_frame_theme, self.review_frame_buttons, C_PINK)
 
-        if self.strip_surface:
-            sw, sh = self.strip_surface.get_size()
-            sx = strip_area_x + (strip_area_w - sw) // 2
-            sy = 90
-            draw_rrect(self.screen, C_LPINK,
-                       (sx - 10, sy - 10, sw + 20, sh + 20), radius=14)
-            self.screen.blit(self.strip_surface, (sx, sy))
-        else:
-            # 합성 중 애니메이션
-            cx = strip_area_x + strip_area_w // 2
-            cy = SCREEN_H // 2 - 60
-            dots = "." * (int(time.time() * 2.5) % 4)
-            draw_text(self.screen, f"합성 중{dots}", self.f_medium, C_GRAY,
-                      cx, cy, anchor="center")
+        draw_text(self.screen, "필터 다시 선택", self.f_medium, C_DARK,
+                  1120, 436, anchor="topleft")
+        self._draw_selected_button_group(
+            self.selected_filter, self.review_filter_buttons, C_BLUE)
+
+        theme_name = composer.FRAME_THEMES[self.selected_frame_theme]["name"]
+        filter_name = FILTERS[self.selected_filter]["name"]
+        draw_text(self.screen, f"{theme_name} 프레임 · {filter_name} 필터",
+                  self.f_small, C_GRAY, 1340, 724, anchor="center")
 
         # ── 하단 버튼 ──────────────────────────────────
         for btn in (self.btn_print, self.btn_qr, self.btn_retake):
