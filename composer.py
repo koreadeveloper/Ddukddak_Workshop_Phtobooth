@@ -50,9 +50,21 @@ FRAME_THEMES = {
     },
 }
 
+PRINT_LAYOUTS = {
+    "auto": "자동",
+    "grid": "2x2",
+    "stacked": "4단",
+}
+
 
 def get_frame_theme(theme_id: str | None) -> dict:
     return FRAME_THEMES.get(theme_id or "", FRAME_THEMES["soft_pink"])
+
+
+def resolve_layout(layout_id: str | None, is_landscape: bool) -> str:
+    if layout_id in {"grid", "stacked"}:
+        return layout_id
+    return "stacked" if is_landscape else "grid"
 
 
 # ─── 내부 유틸 ────────────────────────────────────────
@@ -97,33 +109,18 @@ def _photos_are_landscape(photos: list) -> bool:
     return w >= h
 
 
-def photo_slot_aspect(is_landscape: bool) -> float:
-    """최종 출력 시 한 컷이 들어가는 슬롯의 가로/세로 비율."""
+def _slot_layout(is_landscape: bool, layout_id: str | None = None):
+    layout = resolve_layout(layout_id, is_landscape)
     margin  = 58
     footer  = 92
-    if is_landscape:
+
+    if layout == "stacked":
         gutter = 20
         slot_h = (PRINT_H - 2 * margin - footer - 3 * gutter) // 4
-        slot_w = min(PRINT_W - 2 * margin, int(slot_h * 16 / 9))
-    else:
-        gutter = 30
-        slot_w = (PRINT_W - 2 * margin - gutter) // 2
-        slot_h = (PRINT_H - 2 * margin - gutter - footer) // 2
-    return slot_w / slot_h
-
-
-# ─── RP-108 단일 시트 생성 ─────────────────────────────
-def _make_sheet(photos: list, frame_theme_id: str | None = None) -> Image.Image:
-    """4장 BGR ndarray → RP-108 한 장짜리 네컷 PIL Image"""
-    assert len(photos) == 4
-    theme = get_frame_theme(frame_theme_id)
-
-    margin  = 58
-    footer  = 92
-    if _photos_are_landscape(photos):
-        gutter = 20
-        slot_h = (PRINT_H - 2 * margin - footer - 3 * gutter) // 4
-        slot_w = min(PRINT_W - 2 * margin, int(slot_h * 16 / 9))
+        if is_landscape:
+            slot_w = min(PRINT_W - 2 * margin, int(slot_h * 16 / 9))
+        else:
+            slot_w = min(PRINT_W - 2 * margin, int(slot_h * 4 / 3))
         x = (PRINT_W - slot_w) // 2
         coords = [
             (x, margin + i * (slot_h + gutter))
@@ -139,6 +136,27 @@ def _make_sheet(photos: list, frame_theme_id: str | None = None) -> Image.Image:
             (margin,             margin + slot_h + gutter),
             (margin + slot_w + gutter, margin + slot_h + gutter),
         ]
+    return layout, slot_w, slot_h, coords
+
+
+def photo_slot_aspect(is_landscape: bool, layout_id: str | None = None) -> float:
+    """최종 출력 시 한 컷이 들어가는 슬롯의 가로/세로 비율."""
+    _layout, slot_w, slot_h, _coords = _slot_layout(is_landscape, layout_id)
+    return slot_w / slot_h
+
+
+# ─── RP-108 단일 시트 생성 ─────────────────────────────
+def _make_sheet(
+    photos: list,
+    frame_theme_id: str | None = None,
+    layout_id: str | None = None,
+) -> Image.Image:
+    """4장 BGR ndarray → RP-108 한 장짜리 네컷 PIL Image"""
+    assert len(photos) == 4
+    theme = get_frame_theme(frame_theme_id)
+    is_landscape = _photos_are_landscape(photos)
+    layout, slot_w, slot_h, coords = _slot_layout(is_landscape, layout_id)
+    footer = 92
 
     canvas = Image.new("RGB", (PRINT_W, PRINT_H), theme["bg"])
     draw = ImageDraw.Draw(canvas)
@@ -157,7 +175,7 @@ def _make_sheet(photos: list, frame_theme_id: str | None = None) -> Image.Image:
     # 하단 브랜드 텍스트
     font  = _pil_font(28)
     today = datetime.now().strftime("%Y.%m.%d")
-    label = f"{BRAND}  ·  {theme['name']}  ·  {today}"
+    label = f"{BRAND}  ·  {theme['name']}  ·  {PRINT_LAYOUTS[layout]}  ·  {today}"
     bbox  = draw.textbbox((0, 0), label, font=font)
     tx = (PRINT_W - (bbox[2] - bbox[0])) // 2
     ty = PRINT_H - footer + 26
@@ -181,9 +199,10 @@ def compose_print_image(
     photos: list,
     session_id: str,
     frame_theme_id: str | None = None,
+    layout_id: str | None = None,
 ) -> Path:
     """RP-108 한 장에 네 컷만 배치해 JPEG 저장 후 경로 반환"""
-    sheet = _make_sheet(photos, frame_theme_id)
+    sheet = _make_sheet(photos, frame_theme_id, layout_id)
     PHOTOS_DIR.mkdir(parents=True, exist_ok=True)
     out = PHOTOS_DIR / f"{session_id}.jpg"
     sheet.save(out, "JPEG", quality=95, dpi=(300, 300))
@@ -195,8 +214,9 @@ def make_preview_image(
     photos: list,
     target_h: int = 820,
     frame_theme_id: str | None = None,
+    layout_id: str | None = None,
 ) -> Image.Image:
     """화면 표시용 미리보기 PIL Image (RP-108 시트, 세로 target_h 기준)"""
-    sheet = _make_sheet(photos, frame_theme_id)
+    sheet = _make_sheet(photos, frame_theme_id, layout_id)
     target_w = int(sheet.width * target_h / sheet.height)
     return sheet.resize((target_w, target_h), Image.LANCZOS)

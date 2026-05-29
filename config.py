@@ -52,6 +52,7 @@ CAPTURE_ORIENTATION = os.getenv("PHOTOBOOTH_CAPTURE_ORIENTATION", "portrait").st
 PORTRAIT_ROTATION = os.getenv("PHOTOBOOTH_PORTRAIT_ROTATION", "clockwise").strip().lower()
 DEFAULT_FILTER = os.getenv("PHOTOBOOTH_DEFAULT_FILTER", "bright").strip().lower()
 DEFAULT_FRAME_THEME = os.getenv("PHOTOBOOTH_DEFAULT_FRAME_THEME", "soft_pink").strip().lower()
+DEFAULT_PRINT_LAYOUT = os.getenv("PHOTOBOOTH_DEFAULT_PRINT_LAYOUT", "auto").strip().lower()
 
 # ─── 촬영 흐름 ───────────────────────────────────────
 PHOTO_COUNT      = 4     # 한 세션에 찍을 장수

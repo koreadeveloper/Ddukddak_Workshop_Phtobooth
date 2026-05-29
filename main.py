@@ -303,6 +303,10 @@ class PhotoBooth:
             DEFAULT_FRAME_THEME if DEFAULT_FRAME_THEME in composer.FRAME_THEMES
             else "soft_pink"
         )
+        self.selected_print_layout = (
+            DEFAULT_PRINT_LAYOUT if DEFAULT_PRINT_LAYOUT in composer.PRINT_LAYOUTS
+            else "auto"
+        )
         self.print_copies = max(1, min(DEFAULT_PRINT_COPIES, MAX_PRINT_COPIES))
         self._compose_generation = 0
         self.status_lines = []
@@ -354,6 +358,11 @@ class PhotoBooth:
         self.btn_landscape = Button(
             1170, 218, 220, 62, "가로 촬영", (110, 110, 120), radius=22
         )
+        self.layout_buttons = []
+        for i, (layout_id, label) in enumerate(composer.PRINT_LAYOUTS.items()):
+            self.layout_buttons.append(
+                (layout_id, Button(1410 + i * 125, 218, 112, 62, label, (110, 110, 120), radius=18))
+            )
         self.frame_buttons = []
         for i, (theme_id, theme) in enumerate(composer.FRAME_THEMES.items()):
             x = 930 + (i % 2) * 240
@@ -381,6 +390,11 @@ class PhotoBooth:
             y = 480 + (i // 2) * 64
             self.review_filter_buttons.append(
                 (filter_id, Button(x, y, 200, 50, meta["name"], (110, 110, 120), radius=16))
+            )
+        self.review_layout_buttons = []
+        for i, (layout_id, label) in enumerate(composer.PRINT_LAYOUTS.items()):
+            self.review_layout_buttons.append(
+                (layout_id, Button(1120 + i * 148, 356, 132, 52, label, (110, 110, 120), radius=16))
             )
 
         bw, bh, gap = 330, 80, 36
@@ -452,6 +466,16 @@ class PhotoBooth:
             self.selected_filter = filter_id
             return True
         self.selected_filter = filter_id
+        return False
+
+    def _set_print_layout(self, layout_id: str):
+        if layout_id not in composer.PRINT_LAYOUTS:
+            return False
+        if self.selected_print_layout != layout_id:
+            log.info(f"출력 레이아웃 변경: {self.selected_print_layout} → {layout_id}")
+            self.selected_print_layout = layout_id
+            return True
+        self.selected_print_layout = layout_id
         return False
 
     def _set_print_copies(self, copies: int):
@@ -645,7 +669,7 @@ class PhotoBooth:
             return
 
         frame_aspect = frame_w / frame_h
-        target_aspect = composer.photo_slot_aspect(frame_w >= frame_h)
+        target_aspect = composer.photo_slot_aspect(frame_w >= frame_h, self.selected_print_layout)
         if frame_aspect > target_aspect:
             guide_h = image_rect.height
             guide_w = int(guide_h * target_aspect)
@@ -788,6 +812,7 @@ class PhotoBooth:
         photos = [p.copy() for p in self.captured_bgr]
         session_id = self.session_id
         frame_theme = self.selected_frame_theme
+        print_layout = self.selected_print_layout
 
         def _work():
             try:
@@ -800,10 +825,10 @@ class PhotoBooth:
                     self.thumb_surfaces = surfs
 
                 # 풀 스트립 저장
-                strip_path = composer.compose_print_image(photos, session_id, frame_theme)
+                strip_path = composer.compose_print_image(photos, session_id, frame_theme, print_layout)
 
                 # 미리보기 Surface
-                preview = composer.make_preview_image(photos, 820, frame_theme)
+                preview = composer.make_preview_image(photos, 820, frame_theme, print_layout)
                 strip_surface = pil_to_surface(preview)
                 if generation == self._compose_generation:
                     self.strip_path = strip_path
@@ -934,6 +959,8 @@ class PhotoBooth:
             self.btn_status.update(mpos, mpressed)
             self.btn_portrait.update(mpos, mpressed)
             self.btn_landscape.update(mpos, mpressed)
+            for _, btn in self.layout_buttons:
+                btn.update(mpos, mpressed)
             for _, btn in self.frame_buttons:
                 btn.update(mpos, mpressed)
             for _, btn in self.filter_buttons:
@@ -944,6 +971,8 @@ class PhotoBooth:
             for _, btn in self.review_frame_buttons:
                 btn.update(mpos, mpressed)
             for _, btn in self.review_filter_buttons:
+                btn.update(mpos, mpressed)
+            for _, btn in self.review_layout_buttons:
                 btn.update(mpos, mpressed)
             self.btn_copies_minus.update(mpos, mpressed)
             self.btn_copies_plus.update(mpos, mpressed)
@@ -964,6 +993,10 @@ class PhotoBooth:
             if self.btn_landscape.hit(pos):
                 self._set_capture_orientation("landscape")
                 return
+            for layout_id, btn in self.layout_buttons:
+                if btn.hit(pos):
+                    self._set_print_layout(layout_id)
+                    return
             for theme_id, btn in self.frame_buttons:
                 if btn.hit(pos):
                     self._set_frame_theme(theme_id)
@@ -995,6 +1028,14 @@ class PhotoBooth:
                         self._set_review_notice("사진 합성 중입니다. 잠시 후 다시 눌러 주세요.")
                         return
                     if self._set_filter(filter_id):
+                        self._recompose_current_session()
+                    return
+            for layout_id, btn in self.review_layout_buttons:
+                if btn.hit(pos):
+                    if self._composing:
+                        self._set_review_notice("사진 합성 중입니다. 잠시 후 다시 눌러 주세요.")
+                        return
+                    if self._set_print_layout(layout_id):
                         self._recompose_current_session()
                     return
             if self.btn_copies_minus.hit(pos):
@@ -1070,6 +1111,11 @@ class PhotoBooth:
         self.btn_portrait.draw(self.screen, self.f_medium)
         self.btn_landscape.draw(self.screen, self.f_medium)
 
+        draw_text(self.screen, "출력 레이아웃", self.f_medium, C_DARK,
+                  1410, 176, anchor="topleft")
+        self._draw_selected_button_group(
+            self.selected_print_layout, self.layout_buttons, C_BLUE)
+
         draw_text(self.screen, "프레임", self.f_medium, C_DARK,
                   panel_x, 342, anchor="topleft")
         self._draw_selected_button_group(
@@ -1082,7 +1128,8 @@ class PhotoBooth:
 
         theme_name = composer.FRAME_THEMES[self.selected_frame_theme]["name"]
         filter_name = FILTERS[self.selected_filter]["name"]
-        draw_text(self.screen, f"{theme_name} 프레임 · {filter_name} 필터",
+        layout_name = composer.PRINT_LAYOUTS[self.selected_print_layout]
+        draw_text(self.screen, f"{theme_name} · {filter_name} · {layout_name}",
                   self.f_small, C_GRAY, 1475, 794, anchor="center")
 
         self.btn_start.draw(self.screen, self.f_large)
@@ -1278,6 +1325,11 @@ class PhotoBooth:
         self._draw_selected_button_group(
             self.selected_frame_theme, self.review_frame_buttons, C_PINK)
 
+        draw_text(self.screen, "레이아웃 다시 선택", self.f_medium, C_DARK,
+                  1120, 314, anchor="topleft")
+        self._draw_selected_button_group(
+            self.selected_print_layout, self.review_layout_buttons, C_BLUE)
+
         draw_text(self.screen, "필터 다시 선택", self.f_medium, C_DARK,
                   1120, 436, anchor="topleft")
         self._draw_selected_button_group(
@@ -1285,7 +1337,8 @@ class PhotoBooth:
 
         theme_name = composer.FRAME_THEMES[self.selected_frame_theme]["name"]
         filter_name = FILTERS[self.selected_filter]["name"]
-        draw_text(self.screen, f"{theme_name} 프레임 · {filter_name} 필터",
+        layout_name = composer.PRINT_LAYOUTS[self.selected_print_layout]
+        draw_text(self.screen, f"{theme_name} 프레임 · {filter_name} 필터 · {layout_name}",
                   self.f_small, C_GRAY, 1340, 690, anchor="center")
 
         draw_text(self.screen, "인쇄 매수", self.f_medium, C_DARK,
