@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-"""4컷 스트립 이미지 합성 모듈
-SELPHY CP1500 엽서(100x148mm @ 300dpi) 기준: 1181 x 1748 px
-스트립 2장을 나란히 배치해 1장으로 출력 → 절취선으로 분리
+"""4컷 출력 이미지 합성 모듈
+SELPHY CP1500 RP-108 엽서(100x148mm / 4x6 / 4R @ 300dpi) 기준:
+1181 x 1748 px 한 장에 네 컷만 배치합니다.
 """
 from PIL import Image, ImageDraw, ImageFont
 from pathlib import Path
@@ -14,7 +14,7 @@ from config import PHOTOS_DIR, FONT_CANDIDATES
 
 log = logging.getLogger(__name__)
 
-# 엽서 전체 크기 (300dpi)
+# RP-108 Postcard Size: 100 x 148 mm @ 300dpi
 PRINT_W = 1181
 PRINT_H = 1748
 
@@ -59,28 +59,39 @@ def _add_round_corners(img: Image.Image, radius: int) -> Image.Image:
     return bg.convert("RGB")
 
 
-# ─── 스트립 1장 생성 ──────────────────────────────────
-def _make_one_strip(photos: list) -> Image.Image:
-    """4장 BGR ndarray → 스트립 PIL Image (PRINT_W//2 x PRINT_H)"""
+def _photos_are_landscape(photos: list) -> bool:
+    h, w = photos[0].shape[:2]
+    return w >= h
+
+
+# ─── RP-108 단일 시트 생성 ─────────────────────────────
+def _make_sheet(photos: list) -> Image.Image:
+    """4장 BGR ndarray → RP-108 한 장짜리 네컷 PIL Image"""
     assert len(photos) == 4
 
-    sw = PRINT_W // 2
-    sh = PRINT_H
-    margin  = 28
-    gutter  = 14
-    footer  = 52
+    margin  = 58
+    footer  = 92
+    if _photos_are_landscape(photos):
+        gutter = 20
+        slot_h = (PRINT_H - 2 * margin - footer - 3 * gutter) // 4
+        slot_w = min(PRINT_W - 2 * margin, int(slot_h * 16 / 9))
+        x = (PRINT_W - slot_w) // 2
+        coords = [
+            (x, margin + i * (slot_h + gutter))
+            for i in range(4)
+        ]
+    else:
+        gutter = 30
+        slot_w = (PRINT_W - 2 * margin - gutter) // 2
+        slot_h = (PRINT_H - 2 * margin - gutter - footer) // 2
+        coords = [
+            (margin,             margin),
+            (margin + slot_w + gutter, margin),
+            (margin,             margin + slot_h + gutter),
+            (margin + slot_w + gutter, margin + slot_h + gutter),
+        ]
 
-    slot_w = (sw - 2 * margin - gutter) // 2
-    slot_h = (sh - 2 * margin - gutter - footer) // 2
-
-    canvas = Image.new("RGB", (sw, sh), FRAME_BG)
-
-    coords = [
-        (margin,             margin),
-        (margin + slot_w + gutter, margin),
-        (margin,             margin + slot_h + gutter),
-        (margin + slot_w + gutter, margin + slot_h + gutter),
-    ]
+    canvas = Image.new("RGB", (PRINT_W, PRINT_H), FRAME_BG)
 
     for photo, (x, y) in zip(photos, coords):
         img = _bgr_to_pil(photo)
@@ -90,12 +101,12 @@ def _make_one_strip(photos: list) -> Image.Image:
 
     # 하단 브랜드 텍스트
     draw  = ImageDraw.Draw(canvas)
-    font  = _pil_font(20)
+    font  = _pil_font(28)
     today = datetime.now().strftime("%Y.%m.%d")
     label = f"{BRAND}  ·  {today}"
     bbox  = draw.textbbox((0, 0), label, font=font)
-    tx = (sw - (bbox[2] - bbox[0])) // 2
-    ty = sh - footer + 14
+    tx = (PRINT_W - (bbox[2] - bbox[0])) // 2
+    ty = PRINT_H - footer + 26
     draw.text((tx, ty), label, fill=(165, 130, 145), font=font)
 
     return canvas
@@ -103,29 +114,17 @@ def _make_one_strip(photos: list) -> Image.Image:
 
 # ─── 공개 API ─────────────────────────────────────────
 def compose_print_image(photos: list, session_id: str) -> Path:
-    """스트립 2장 나란히 → JPEG 저장 후 경로 반환"""
-    strip = _make_one_strip(photos)
-
-    full = Image.new("RGB", (PRINT_W, PRINT_H), FRAME_BG)
-    full.paste(strip, (0, 0))
-    full.paste(strip, (PRINT_W // 2, 0))
-
-    # 중앙 절취선
-    draw = ImageDraw.Draw(full)
-    cx = PRINT_W // 2
-    for y in range(0, PRINT_H, 20):
-        draw.line([(cx, y), (cx, min(y + 11, PRINT_H))],
-                  fill=(190, 175, 180), width=2)
-
+    """RP-108 한 장에 네 컷만 배치해 JPEG 저장 후 경로 반환"""
+    sheet = _make_sheet(photos)
     PHOTOS_DIR.mkdir(parents=True, exist_ok=True)
     out = PHOTOS_DIR / f"{session_id}.jpg"
-    full.save(out, "JPEG", quality=95, dpi=(300, 300))
-    log.info(f"스트립 저장: {out}")
+    sheet.save(out, "JPEG", quality=95, dpi=(300, 300))
+    log.info(f"RP-108 네컷 저장: {out} ({PRINT_W}x{PRINT_H})")
     return out
 
 
 def make_preview_image(photos: list, target_h: int = 820) -> Image.Image:
-    """화면 표시용 미리보기 PIL Image (스트립 1장, 세로 target_h 기준)"""
-    strip  = _make_one_strip(photos)
-    target_w = int(strip.width * target_h / strip.height)
-    return strip.resize((target_w, target_h), Image.LANCZOS)
+    """화면 표시용 미리보기 PIL Image (RP-108 시트, 세로 target_h 기준)"""
+    sheet = _make_sheet(photos)
+    target_w = int(sheet.width * target_h / sheet.height)
+    return sheet.resize((target_w, target_h), Image.LANCZOS)

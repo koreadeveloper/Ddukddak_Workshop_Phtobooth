@@ -76,6 +76,14 @@ def bgr_to_surface(bgr: np.ndarray, size: tuple = None) -> pygame.Surface:
     return pygame.surfarray.make_surface(rgb.swapaxes(0, 1))
 
 
+def fit_bgr_to_surface(bgr: np.ndarray, max_w: int, max_h: int) -> pygame.Surface:
+    """비율을 유지하며 지정 영역 안에 들어가는 pygame Surface 생성"""
+    h, w = bgr.shape[:2]
+    scale = min(max_w / w, max_h / h)
+    target = (max(1, int(w * scale)), max(1, int(h * scale)))
+    return bgr_to_surface(bgr, target)
+
+
 def pil_to_surface(pil_img) -> pygame.Surface:
     """PIL Image → pygame Surface"""
     arr = np.array(pil_img.convert("RGB"))
@@ -272,6 +280,14 @@ class PhotoBooth:
         self.qr_server.start()
 
         # ── 세션 데이터 ───────────────────────────────
+        self.capture_orientation = (
+            CAPTURE_ORIENTATION if CAPTURE_ORIENTATION in {"portrait", "landscape"}
+            else "portrait"
+        )
+        self.portrait_rotation = (
+            PORTRAIT_ROTATION if PORTRAIT_ROTATION in {"clockwise", "counterclockwise"}
+            else "clockwise"
+        )
         self._reset_session()
 
         # ── 상태 머신 ─────────────────────────────────
@@ -303,6 +319,12 @@ class PhotoBooth:
         self.btn_start = Button(
             SCREEN_W // 2 - 220, 405, 440, 92, "촬영 시작", C_PINK, radius=28
         )
+        self.btn_portrait = Button(
+            SCREEN_W // 2 - 255, 525, 240, 66, "세로 촬영", C_BLUE, radius=22
+        )
+        self.btn_landscape = Button(
+            SCREEN_W // 2 + 15, 525, 240, 66, "가로 촬영", (110, 110, 120), radius=22
+        )
 
         bw, bh, gap = 330, 80, 36
         total = 3 * bw + 2 * gap
@@ -331,6 +353,35 @@ class PhotoBooth:
         self._print_done    = False
         self._print_ok      = False
 
+    def _set_capture_orientation(self, orientation: str):
+        if orientation not in {"portrait", "landscape"}:
+            return
+        if self.capture_orientation != orientation:
+            log.info(f"촬영 방향 변경: {self.capture_orientation} → {orientation}")
+        self.capture_orientation = orientation
+
+    def _oriented_frame(self, frame: np.ndarray) -> np.ndarray:
+        """촬영/출력용 프레임 방향을 적용합니다."""
+        if self.capture_orientation == "portrait":
+            flag = (
+                cv2.ROTATE_90_CLOCKWISE
+                if self.portrait_rotation == "clockwise"
+                else cv2.ROTATE_90_COUNTERCLOCKWISE
+            )
+            return cv2.rotate(frame, flag)
+        return frame
+
+    def _display_frame(self, frame: np.ndarray) -> np.ndarray:
+        frame = self._oriented_frame(frame)
+        if PREVIEW_MIRROR:
+            frame = cv2.flip(frame, 1)
+        return frame
+
+    def _review_thumb_size(self) -> tuple[int, int]:
+        if self.capture_orientation == "portrait":
+            return 255, 370
+        return 370, 255
+
     # ─────────────────────────────────────────────────
     #  상태 전환
     # ─────────────────────────────────────────────────
@@ -357,7 +408,7 @@ class PhotoBooth:
         frame = self.camera.get_frame()
         if frame is None:
             frame = np.zeros((CAM_H, CAM_W, 3), dtype=np.uint8)
-        self.captured_bgr.append(frame.copy())
+        self.captured_bgr.append(self._oriented_frame(frame).copy())
         log.info(f"촬영 {len(self.captured_bgr)}/{PHOTO_COUNT}")
 
     def _start_compose(self):
@@ -368,8 +419,9 @@ class PhotoBooth:
             try:
                 # 썸네일 (빠름)
                 surfs = []
+                thumb_w, thumb_h = self._review_thumb_size()
                 for bgr in self.captured_bgr:
-                    surfs.append(bgr_to_surface(bgr, (370, 255)))
+                    surfs.append(bgr_to_surface(bgr, (thumb_w, thumb_h)))
                 self.thumb_surfaces = surfs
 
                 # 풀 스트립 저장
@@ -470,6 +522,8 @@ class PhotoBooth:
         # 버튼 hover 업데이트
         if self.state == St.IDLE:
             self.btn_start.update(mpos, mpressed)
+            self.btn_portrait.update(mpos, mpressed)
+            self.btn_landscape.update(mpos, mpressed)
         elif self.state == St.REVIEW:
             for btn in (self.btn_print, self.btn_qr, self.btn_retake):
                 btn.update(mpos, mpressed)
@@ -478,6 +532,12 @@ class PhotoBooth:
 
     def _handle_click(self, pos):
         if self.state == St.IDLE:
+            if self.btn_portrait.hit(pos):
+                self._set_capture_orientation("portrait")
+                return
+            if self.btn_landscape.hit(pos):
+                self._set_capture_orientation("landscape")
+                return
             self._begin_countdown()
 
         elif self.state == St.REVIEW:
@@ -521,21 +581,29 @@ class PhotoBooth:
                   SCREEN_W // 2, 300, anchor="center")
 
         self.btn_start.draw(self.screen, self.f_large)
+        self.btn_portrait.color = C_BLUE if self.capture_orientation == "portrait" else (110, 110, 120)
+        self.btn_portrait.hover_col = tuple(min(c + 25, 255) for c in self.btn_portrait.color)
+        self.btn_portrait.press_col = tuple(max(c - 30, 0) for c in self.btn_portrait.color)
+        self.btn_landscape.color = C_BLUE if self.capture_orientation == "landscape" else (110, 110, 120)
+        self.btn_landscape.hover_col = tuple(min(c + 25, 255) for c in self.btn_landscape.color)
+        self.btn_landscape.press_col = tuple(max(c - 30, 0) for c in self.btn_landscape.color)
+        self.btn_portrait.draw(self.screen, self.f_medium)
+        self.btn_landscape.draw(self.screen, self.f_medium)
 
         if int(time.time() * 1.6) % 2:
             draw_text(self.screen, "터치 또는 클릭으로 시작",
                       self.f_small, C_GRAY,
-                      SCREEN_W // 2, 515, anchor="center")
+                      SCREEN_W // 2, 620, anchor="center")
 
         # 카메라 소형 미리보기
         frame = self.camera.get_frame()
         if frame is not None:
-            pw, ph = 340, 192
-            prev = bgr_to_surface(frame, (pw, ph))
-            if PREVIEW_MIRROR:
-                prev = pygame.transform.flip(prev, True, False)
+            frame = self._display_frame(frame)
+            box_w, box_h = 360, 390
+            prev = fit_bgr_to_surface(frame, box_w, box_h)
+            pw, ph = prev.get_size()
             px = SCREEN_W // 2 - pw // 2
-            py = 560
+            py = 675
             draw_rrect(self.screen, C_LPINK,
                        (px - 6, py - 6, pw + 12, ph + 12), radius=14)
             self.screen.blit(prev, (px, py))
@@ -570,13 +638,13 @@ class PhotoBooth:
             self._set_state(St.FLASH)
 
     def _draw_countdown(self):
-        # 풀스크린 카메라 프리뷰 (좌우 반전 = 거울 모드)
+        # 카메라 프리뷰 (비율 유지)
         frame = self.camera.get_frame()
         if frame is not None:
-            prev = bgr_to_surface(frame, (SCREEN_W, SCREEN_H))
-            if PREVIEW_MIRROR:
-                prev = pygame.transform.flip(prev, True, False)
-            self.screen.blit(prev, (0, 0))
+            self.screen.fill((20, 20, 30))
+            prev = fit_bgr_to_surface(self._display_frame(frame), SCREEN_W, SCREEN_H)
+            pw, ph = prev.get_size()
+            self.screen.blit(prev, ((SCREEN_W - pw) // 2, (SCREEN_H - ph) // 2))
         else:
             self.screen.fill((20, 20, 30))
 
@@ -613,16 +681,17 @@ class PhotoBooth:
     def _draw_shot_thumbnails(self):
         if not self.captured_bgr:
             return
-        tw, th = 150, 105
+        tw, th = (86, 150) if self.capture_orientation == "portrait" else (150, 105)
         gap    = 12
         total  = len(self.captured_bgr) * (tw + gap) - gap
         sx     = (SCREEN_W - total) // 2
         sy     = SCREEN_H - th - 18
         for i, bgr in enumerate(self.captured_bgr):
-            surf = bgr_to_surface(bgr, (tw, th))
+            surf = fit_bgr_to_surface(bgr, tw, th)
             rx   = sx + i * (tw + gap)
             draw_rrect(self.screen, C_WHITE, (rx - 4, sy - 4, tw + 8, th + 8), 8)
-            self.screen.blit(surf, (rx, sy))
+            sw, sh = surf.get_size()
+            self.screen.blit(surf, (rx + (tw - sw) // 2, sy + (th - sh) // 2))
 
     # ═══════════════════════════════════════════════
     #  FLASH 렌더링
@@ -630,10 +699,10 @@ class PhotoBooth:
     def _draw_flash(self):
         frame = self.camera.get_frame()
         if frame is not None:
-            prev = bgr_to_surface(frame, (SCREEN_W, SCREEN_H))
-            if PREVIEW_MIRROR:
-                prev = pygame.transform.flip(prev, True, False)
-            self.screen.blit(prev, (0, 0))
+            self.screen.fill((20, 20, 30))
+            prev = fit_bgr_to_surface(self._display_frame(frame), SCREEN_W, SCREEN_H)
+            pw, ph = prev.get_size()
+            self.screen.blit(prev, ((SCREEN_W - pw) // 2, (SCREEN_H - ph) // 2))
         else:
             self.screen.fill((20, 20, 30))
 
@@ -672,7 +741,7 @@ class PhotoBooth:
                   SCREEN_W // 2, 44, anchor="center")
 
         # ── 좌측: 4개 썸네일 그리드 ──────────────────
-        tw, th = 370, 255
+        tw, th = self._review_thumb_size()
         gap    = 18
         grid_x = 80
         grid_y = 110
@@ -880,6 +949,11 @@ def main():
                         help="OpenCV 카메라 번호 (/dev/video0이면 0)")
     parser.add_argument("--camera-device",
                         help="카메라 장치 경로 예: /dev/video0")
+    parser.add_argument("--capture-orientation", choices=["portrait", "landscape"],
+                        help="촬영/저장 방향 선택")
+    parser.add_argument("--portrait-rotation",
+                        choices=["clockwise", "counterclockwise"],
+                        help="세로 촬영 시 카메라 회전 방향")
     parser.add_argument("--printer",
                         help="CUPS 프린터 이름 예: Canon_CP1500")
     parser.add_argument("--qr-port", type=int,
@@ -901,6 +975,10 @@ def main():
         _set_runtime_value("CAM_INDEX", args.camera_index)
     if args.camera_device:
         _set_runtime_value("CAM_DEVICE", args.camera_device)
+    if args.capture_orientation:
+        _set_runtime_value("CAPTURE_ORIENTATION", args.capture_orientation)
+    if args.portrait_rotation:
+        _set_runtime_value("PORTRAIT_ROTATION", args.portrait_rotation)
     if args.printer:
         _set_runtime_value("PRINTER_NAME", args.printer)
     if args.qr_port is not None:

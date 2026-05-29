@@ -132,9 +132,20 @@ cd ~/photobooth
 ./run.sh --test                 # 카메라 없이 UI/촬영 흐름 테스트
 ./run.sh --window               # 창 모드
 ./run.sh --camera-index 1       # 카메라 번호 지정
+./run.sh --capture-orientation portrait  # 세로 촬영/저장
+./run.sh --capture-orientation landscape # 가로 촬영/저장
+./run.sh --portrait-rotation counterclockwise # 세로 방향이 반대일 때
 ./run.sh --printer Canon_CP1500 # CUPS 프린터 이름 지정
 ./run.sh --no-audio             # 오디오 장치 문제 시 무음 실행
 ./run.sh --hide-cursor          # 터치 전용 부스에서 커서 숨김
+```
+
+기본 출력은 CP1500 RP-108 Postcard Size `100 x 148 mm` 기준 `1181 x 1748 px @ 300dpi`입니다. 한 파일에는 네 컷만 들어갑니다.
+
+세로 촬영이 기본입니다. 화면에서 `세로 촬영` / `가로 촬영` 버튼을 눌러 세션 시작 전에 바꿀 수 있습니다. 세로 사진이 거꾸로 저장되면 `.env`에서 아래 값을 바꾸거나 실행 옵션을 사용하세요.
+
+```bash
+PHOTOBOOTH_PORTRAIT_ROTATION=counterclockwise
 ```
 
 ## 6. 부팅 자동 실행
@@ -182,4 +193,3 @@ lpinfo -v
 hostname -I
 ss -tlnp | grep 8080
 ```
-
