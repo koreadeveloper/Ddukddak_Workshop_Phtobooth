@@ -19,6 +19,7 @@ import logging
 import argparse
 import math
 import random
+import shutil
 
 import cv2
 import pygame
@@ -29,7 +30,7 @@ import config as cfg
 from config import *
 from camera import Camera, MockCamera
 import composer
-from qr_share import QRServer
+from qr_share import QRServer, get_local_ip
 import printer
 from effects import FILTERS, apply_filter
 
@@ -55,6 +56,7 @@ class St:
     REVIEW    = "review"
     PRINTING  = "printing"
     QR_SHOW   = "qr_show"
+    STATUS    = "status"
 
 
 # ════════════════════════════════════════════════════
@@ -301,7 +303,10 @@ class PhotoBooth:
             DEFAULT_FRAME_THEME if DEFAULT_FRAME_THEME in composer.FRAME_THEMES
             else "soft_pink"
         )
+        self.print_copies = max(1, min(DEFAULT_PRINT_COPIES, MAX_PRINT_COPIES))
         self._compose_generation = 0
+        self.status_lines = []
+        self.status_checked_at = 0.0
         self._reset_session()
 
         # ── 상태 머신 ─────────────────────────────────
@@ -332,6 +337,9 @@ class PhotoBooth:
         # ── 버튼 (REVIEW 화면) ─────────────────────────
         self.btn_start = Button(
             1260, 850, 430, 92, "촬영 시작", C_PINK, radius=28
+        )
+        self.btn_status = Button(
+            1540, 38, 270, 58, "운영 점검", (110, 110, 120), radius=18
         )
         self.btn_portrait = Button(
             930, 218, 220, 62, "세로 촬영", C_BLUE, radius=22
@@ -376,6 +384,11 @@ class PhotoBooth:
         self.btn_qr     = Button(bx + bw + gap, by, bw, bh, "QR 받기",  C_BLUE)
         self.btn_retake = Button(bx+2*(bw+gap), by, bw, bh, "다시 찍기",
                                  (110, 110, 120))
+        self.btn_copies_minus = Button(1120, 760, 70, 58, "-", (110, 110, 120), radius=16)
+        self.btn_copies_plus = Button(1490, 760, 70, 58, "+", C_BLUE, radius=16)
+        self.btn_status_close = Button(
+            SCREEN_W // 2 - 165, SCREEN_H - 140, 330, 72, "돌아가기", C_BLUE, radius=20
+        )
 
         PHOTOS_DIR.mkdir(parents=True, exist_ok=True)
         log.info(f"포토부스 초기화 완료 (test_mode={test_mode})")
@@ -396,6 +409,7 @@ class PhotoBooth:
         self._compose_generation += 1
         self._print_done    = False
         self._print_ok      = False
+        self.print_copies   = max(1, min(DEFAULT_PRINT_COPIES, MAX_PRINT_COPIES))
 
     def _set_capture_orientation(self, orientation: str):
         if orientation not in {"portrait", "landscape"}:
@@ -423,6 +437,28 @@ class PhotoBooth:
             return True
         self.selected_filter = filter_id
         return False
+
+    def _set_print_copies(self, copies: int):
+        copies = max(1, min(copies, MAX_PRINT_COPIES))
+        if copies != self.print_copies:
+            log.info(f"인쇄 매수 변경: {self.print_copies} → {copies}")
+        self.print_copies = copies
+
+    def _refresh_status(self):
+        printer_ok, printer_text = printer.get_printer_status()
+        total, used, free = shutil.disk_usage(BASE_DIR)
+        photos_count = len(list(PHOTOS_DIR.glob("*.jpg"))) if PHOTOS_DIR.exists() else 0
+        frame = self.camera.get_frame()
+        camera_text = "카메라 프레임 정상" if frame is not None else "카메라 프레임 없음"
+        qr_text = f"QR 서버: http://{get_local_ip()}:{QR_SERVER_PORT}"
+        self.status_lines = [
+            ("카메라", camera_text, frame is not None),
+            ("프린터", printer_text or PRINTER_NAME, printer_ok),
+            ("QR", qr_text, self.qr_server.is_running),
+            ("저장공간", f"여유 {free // (1024 ** 3)}GB / 전체 {total // (1024 ** 3)}GB", free > 1024 ** 3),
+            ("사진 폴더", f"{photos_count}개 JPG 저장됨", True),
+        ]
+        self.status_checked_at = time.time()
 
     def _oriented_frame(self, frame: np.ndarray) -> np.ndarray:
         """촬영/출력용 프레임 방향을 적용합니다."""
@@ -545,7 +581,7 @@ class PhotoBooth:
 
         def _work():
             if self.strip_path and self.strip_path.exists():
-                ok = printer.print_photo(self.strip_path)
+                ok = printer.print_photo(self.strip_path, self.print_copies)
             else:
                 log.error("스트립 파일 없음 - 합성 완료 전에 인쇄 요청됨")
                 ok = False
@@ -601,10 +637,16 @@ class PhotoBooth:
                     return False
 
                 if self.state == St.IDLE:
-                    self._begin_countdown()
+                    if event.key == pygame.K_s:
+                        self._refresh_status()
+                        self._set_state(St.STATUS)
+                    else:
+                        self._begin_countdown()
                 elif self.state == St.QR_SHOW:
                     self._set_state(St.IDLE)
                     self._reset_session()
+                elif self.state == St.STATUS:
+                    self._set_state(St.IDLE)
 
             # ── 마우스/터치 클릭 ──────────────────────
             if event.type in (pygame.MOUSEBUTTONDOWN, pygame.FINGERDOWN):
@@ -620,6 +662,7 @@ class PhotoBooth:
         # 버튼 hover 업데이트
         if self.state == St.IDLE:
             self.btn_start.update(mpos, mpressed)
+            self.btn_status.update(mpos, mpressed)
             self.btn_portrait.update(mpos, mpressed)
             self.btn_landscape.update(mpos, mpressed)
             for _, btn in self.frame_buttons:
@@ -633,11 +676,19 @@ class PhotoBooth:
                 btn.update(mpos, mpressed)
             for _, btn in self.review_filter_buttons:
                 btn.update(mpos, mpressed)
+            self.btn_copies_minus.update(mpos, mpressed)
+            self.btn_copies_plus.update(mpos, mpressed)
+        elif self.state == St.STATUS:
+            self.btn_status_close.update(mpos, mpressed)
 
         return True
 
     def _handle_click(self, pos):
         if self.state == St.IDLE:
+            if self.btn_status.hit(pos):
+                self._refresh_status()
+                self._set_state(St.STATUS)
+                return
             if self.btn_portrait.hit(pos):
                 self._set_capture_orientation("portrait")
                 return
@@ -671,6 +722,12 @@ class PhotoBooth:
                     if self._set_filter(filter_id):
                         self._recompose_current_session()
                     return
+            if self.btn_copies_minus.hit(pos):
+                self._set_print_copies(self.print_copies - 1)
+                return
+            if self.btn_copies_plus.hit(pos):
+                self._set_print_copies(self.print_copies + 1)
+                return
             if self.btn_print.hit(pos):
                 if self._composing:
                     log.info("합성 중 - 인쇄 대기")
@@ -691,6 +748,10 @@ class PhotoBooth:
         elif self.state == St.PRINTING and self._print_done:
             self._set_state(St.IDLE)
             self._reset_session()
+
+        elif self.state == St.STATUS:
+            if self.btn_status_close.hit(pos):
+                self._set_state(St.IDLE)
 
     # ═══════════════════════════════════════════════
     #  IDLE 렌더링
@@ -714,6 +775,7 @@ class PhotoBooth:
 
         draw_text(self.screen, "뚝딱 공방 포토부스", self.f_medium, C_GRAY,
                   470, 152, anchor="center")
+        self.btn_status.draw(self.screen, self.f_small)
 
         panel_x = 860
         draw_text(self.screen, "촬영 방향", self.f_medium, C_DARK,
@@ -949,7 +1011,14 @@ class PhotoBooth:
         theme_name = composer.FRAME_THEMES[self.selected_frame_theme]["name"]
         filter_name = FILTERS[self.selected_filter]["name"]
         draw_text(self.screen, f"{theme_name} 프레임 · {filter_name} 필터",
-                  self.f_small, C_GRAY, 1340, 724, anchor="center")
+                  self.f_small, C_GRAY, 1340, 690, anchor="center")
+
+        draw_text(self.screen, "인쇄 매수", self.f_medium, C_DARK,
+                  1120, 724, anchor="topleft")
+        self.btn_copies_minus.draw(self.screen, self.f_large)
+        self.btn_copies_plus.draw(self.screen, self.f_large)
+        draw_text(self.screen, f"{self.print_copies} 장", self.f_large, C_DARK,
+                  1340, 790, anchor="center")
 
         # ── 하단 버튼 ──────────────────────────────────
         for btn in (self.btn_print, self.btn_qr, self.btn_retake):
@@ -964,9 +1033,40 @@ class PhotoBooth:
                 dim.fill((180, 180, 180, 120))
                 self.screen.blit(dim, btn.rect.topleft)
 
+        remain = max(0, REVIEW_TIMEOUT - int(time.time() - self.state_time))
+        draw_text(self.screen, f"{remain}초 후 자동 초기화",
+                  self.f_tiny, C_GRAY, SCREEN_W - 120, SCREEN_H - 34, anchor="center")
+        if remain <= 0:
+            self._set_state(St.IDLE)
+            self._reset_session()
+
     # ═══════════════════════════════════════════════
     #  PRINTING 렌더링
     # ═══════════════════════════════════════════════
+    def _draw_status(self):
+        self.screen.fill(C_BG)
+        draw_text(self.screen, "운영 점검", self.f_big, C_PINK,
+                  SCREEN_W // 2, 90, anchor="center")
+        draw_text(self.screen, "카메라 · 프린터 · QR · 저장공간 상태",
+                  self.f_medium, C_GRAY, SCREEN_W // 2, 178, anchor="center")
+
+        if not self.status_lines or time.time() - self.status_checked_at > 10:
+            self._refresh_status()
+
+        y = 280
+        for title, detail, ok in self.status_lines:
+            color = C_GREEN if ok else C_PINK
+            draw_rrect(self.screen, C_WHITE, (360, y - 20, 1200, 92), radius=12)
+            draw_text(self.screen, "정상" if ok else "확인", self.f_medium, color,
+                      430, y + 24, anchor="center")
+            draw_text(self.screen, title, self.f_medium, C_DARK,
+                      540, y + 4, anchor="topleft")
+            draw_text(self.screen, detail[:70], self.f_small, C_GRAY,
+                      760, y + 10, anchor="topleft")
+            y += 118
+
+        self.btn_status_close.draw(self.screen, self.f_medium)
+
     def _draw_printing(self):
         self.screen.fill(C_BG)
         elapsed = time.time() - self.state_time
@@ -975,7 +1075,8 @@ class PhotoBooth:
             dots = "." * (int(elapsed * 2) % 4)
             draw_text(self.screen, f"인쇄 중{dots}", self.f_big, C_PINK,
                       SCREEN_W // 2, SCREEN_H // 2 - 60, anchor="center")
-            draw_text(self.screen, "잠시만 기다려 주세요", self.f_medium, C_GRAY,
+            draw_text(self.screen, f"{self.print_copies}장 출력 요청 · 잠시만 기다려 주세요",
+                      self.f_medium, C_GRAY,
                       SCREEN_W // 2, SCREEN_H // 2 + 40, anchor="center")
 
             # 프린터 아이콘 바운스
@@ -987,7 +1088,7 @@ class PhotoBooth:
             if self._print_ok:
                 draw_text(self.screen, "인쇄 완료!", self.f_big, C_GREEN,
                           SCREEN_W // 2, SCREEN_H // 2 - 50, anchor="center")
-                draw_text(self.screen, "프린터에서 사진을 가져가세요",
+                draw_text(self.screen, f"프린터에서 사진 {self.print_copies}장을 가져가세요",
                           self.f_large, C_DARK,
                           SCREEN_W // 2, SCREEN_H // 2 + 50, anchor="center")
             else:
@@ -1081,6 +1182,9 @@ class PhotoBooth:
 
             elif self.state == St.QR_SHOW:
                 self._draw_qr()
+
+            elif self.state == St.STATUS:
+                self._draw_status()
 
             self._present()
             self.clock.tick(FPS)

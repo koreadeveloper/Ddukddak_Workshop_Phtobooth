@@ -54,9 +54,12 @@ PHOTO_COUNT      = 4     # 한 세션에 찍을 장수
 COUNTDOWN_SECS   = 3     # 카운트다운 초
 SHOT_DELAY       = 1.2   # 찰칵 후 다음 카운트 전 대기(초)
 QR_SHOW_TIMEOUT  = 30    # QR 화면 자동 복귀(초)
+REVIEW_TIMEOUT   = _env_int("PHOTOBOOTH_REVIEW_TIMEOUT", 120)
 
 # ─── 인쇄 ────────────────────────────────────────────
 PRINTER_NAME = os.getenv("PHOTOBOOTH_PRINTER_NAME", "Canon_CP1500")
+DEFAULT_PRINT_COPIES = _env_int("PHOTOBOOTH_DEFAULT_PRINT_COPIES", 1)
+MAX_PRINT_COPIES = _env_int("PHOTOBOOTH_MAX_PRINT_COPIES", 3)
 
 # ─── QR 공유 서버 ─────────────────────────────────────
 QR_SERVER_PORT = _env_int("PHOTOBOOTH_QR_PORT", 8080)

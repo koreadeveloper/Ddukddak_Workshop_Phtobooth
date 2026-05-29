@@ -153,7 +153,12 @@ PHOTOBOOTH_PORTRAIT_ROTATION=counterclockwise
 ```bash
 PHOTOBOOTH_DEFAULT_FRAME_THEME=soft_pink  # soft_pink/classic_white/studio_black/sky_blue
 PHOTOBOOTH_DEFAULT_FILTER=bright          # original/bright/warm/cool/mono
+PHOTOBOOTH_DEFAULT_PRINT_COPIES=1
+PHOTOBOOTH_MAX_PRINT_COPIES=3
+PHOTOBOOTH_REVIEW_TIMEOUT=120
 ```
+
+리뷰 화면에서는 인쇄 매수를 `1~PHOTOBOOTH_MAX_PRINT_COPIES` 범위에서 바꿀 수 있습니다. 손님이 리뷰 화면을 오래 방치하면 `PHOTOBOOTH_REVIEW_TIMEOUT`초 뒤 대기 화면으로 자동 복귀합니다. 시작 화면의 `운영 점검`에서는 카메라 프레임, CUPS 프린터 등록, QR 서버 주소, 저장공간을 확인할 수 있습니다.
 
 ## 6. 부팅 자동 실행
 

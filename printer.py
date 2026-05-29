@@ -9,12 +9,13 @@ import config as cfg
 log = logging.getLogger(__name__)
 
 
-def print_photo(file_path: Path) -> bool:
+def print_photo(file_path: Path, copies: int = 1) -> bool:
     """CUPS lp 명령으로 엽서 크기 출력"""
+    copies = max(1, min(int(copies), cfg.MAX_PRINT_COPIES))
     cmd = [
         "lp",
         "-d", cfg.PRINTER_NAME,
-        "-n", "1",
+        "-n", str(copies),
         "-o", "media=Postcard",
         "-o", "PageSize=Postcard",
         "-o", "fit-to-page",
@@ -24,7 +25,7 @@ def print_photo(file_path: Path) -> bool:
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
         if result.returncode == 0:
-            log.info(f"인쇄 요청 성공: {file_path}")
+            log.info(f"인쇄 요청 성공: {file_path} ({copies}장)")
             return True
         log.error(f"인쇄 실패 (code={result.returncode}): {result.stderr.strip()}")
         return False
