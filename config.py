@@ -21,6 +21,23 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _env_text(name: str, default: str) -> str:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip()
+
+
+# ─── 브랜딩/행사명 ────────────────────────────────────
+BRAND_NAME = _env_text("PHOTOBOOTH_BRAND_NAME", "뚝딱 포토부스")
+EVENT_TITLE = _env_text("PHOTOBOOTH_EVENT_TITLE", "오늘의 네컷")
+BOOTH_SUBTITLE = _env_text("PHOTOBOOTH_BOOTH_SUBTITLE", "뚝딱 공방 포토부스")
+FOOTER_TEXT = _env_text("PHOTOBOOTH_FOOTER_TEXT", "어린이 포토부스  |  뚝딱 공방")
+PRINT_BRAND_TEXT = _env_text("PHOTOBOOTH_PRINT_BRAND_TEXT", BRAND_NAME)
+PRINT_MARK_TEXT = _env_text("PHOTOBOOTH_PRINT_MARK_TEXT", "FOUR CUT")
+DOWNLOAD_FILENAME_PREFIX = _env_text("PHOTOBOOTH_DOWNLOAD_PREFIX", "photobooth")
+
+
 # ─── 화면 ────────────────────────────────────────────
 SCREEN_W   = _env_int("PHOTOBOOTH_SCREEN_W", 1920)
 SCREEN_H   = _env_int("PHOTOBOOTH_SCREEN_H", 1080)

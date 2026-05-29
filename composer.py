@@ -10,7 +10,7 @@ import cv2
 import numpy as np
 import logging
 
-from config import PHOTOS_DIR, FONT_CANDIDATES
+from config import PHOTOS_DIR, FONT_CANDIDATES, PRINT_BRAND_TEXT, PRINT_MARK_TEXT
 
 log = logging.getLogger(__name__)
 
@@ -18,7 +18,6 @@ log = logging.getLogger(__name__)
 PRINT_W = 1181
 PRINT_H = 1748
 
-BRAND = "뚝딱 포토부스"
 FRAME_THEMES = {
     "soft_pink": {
         "name": "핑크",
@@ -175,14 +174,14 @@ def _make_sheet(
     # 하단 브랜드 텍스트
     font  = _pil_font(28)
     today = datetime.now().strftime("%Y.%m.%d")
-    label = f"{BRAND}  ·  {theme['name']}  ·  {PRINT_LAYOUTS[layout]}  ·  {today}"
+    label = f"{PRINT_BRAND_TEXT}  ·  {theme['name']}  ·  {PRINT_LAYOUTS[layout]}  ·  {today}"
     bbox  = draw.textbbox((0, 0), label, font=font)
     tx = (PRINT_W - (bbox[2] - bbox[0])) // 2
     ty = PRINT_H - footer + 26
     draw.text((tx, ty), label, fill=theme["text"], font=font)
 
     mark_font = _pil_font(18)
-    mark = "FOUR CUT"
+    mark = PRINT_MARK_TEXT
     mark_bbox = draw.textbbox((0, 0), mark, font=mark_font)
     draw.text(
         (PRINT_W - mark_bbox[2] - 44, 28),

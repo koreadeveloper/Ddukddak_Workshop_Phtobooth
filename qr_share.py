@@ -68,6 +68,11 @@ def _session_path(session_id: str):
     return sid, cfg.PHOTOS_DIR / f"{sid}.jpg"
 
 
+def _download_prefix() -> str:
+    prefix = re.sub(r"[^A-Za-z0-9_.-]+", "_", cfg.DOWNLOAD_FILENAME_PREFIX).strip("._")
+    return prefix or "photobooth"
+
+
 class _PhotoHandler(http.server.BaseHTTPRequestHandler):
     """/s/<session_id> 모바일 페이지와 JPEG 다운로드 응답"""
 
@@ -100,12 +105,14 @@ class _PhotoHandler(http.server.BaseHTTPRequestHandler):
 
     def _send_mobile_page(self, sid: str):
         safe_sid = html.escape(sid, quote=True)
+        safe_brand = html.escape(cfg.BRAND_NAME or "Photo Booth", quote=True)
+        filename = f"{_download_prefix()}_{sid}.jpg"
         body = f"""<!doctype html>
 <html lang="ko">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>뚝딱 포토부스 사진 받기</title>
+  <title>{safe_brand} 사진 받기</title>
   <style>
     body {{
       margin: 0;
@@ -159,10 +166,10 @@ class _PhotoHandler(http.server.BaseHTTPRequestHandler):
 </head>
 <body>
   <main>
-    <h1>사진 저장하기</h1>
+    <h1>{safe_brand}</h1>
     <p>아래 버튼을 누르면 네컷 사진 JPG 파일을 저장할 수 있습니다.</p>
     <img src="/photo/{safe_sid}.jpg" alt="네컷 사진 미리보기">
-    <a class="button" href="/download/{safe_sid}.jpg" download="photobooth_{safe_sid}.jpg">사진 다운로드</a>
+    <a class="button" href="/download/{safe_sid}.jpg" download="{filename}">사진 다운로드</a>
     <p class="hint">같은 Wi-Fi에서만 열립니다. 저장이 안 되면 사진을 길게 눌러 저장하세요.</p>
   </main>
 </body>
@@ -182,9 +189,10 @@ class _PhotoHandler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Type", "image/jpeg")
         self.send_header("Content-Length", str(len(data)))
         disposition = "attachment" if attachment else "inline"
+        filename = f"{_download_prefix()}_{sid}.jpg"
         self.send_header(
             "Content-Disposition",
-            f'{disposition}; filename="photobooth_{sid}.jpg"',
+            f'{disposition}; filename="{filename}"',
         )
         self.send_header("Cache-Control", "no-store")
         self.end_headers()

@@ -211,7 +211,7 @@ class PhotoBooth:
         self.display = pygame.display.set_mode(display_size, flags)
         self.screen = pygame.Surface((SCREEN_W, SCREEN_H)).convert()
         self._update_display_transform()
-        pygame.display.set_caption("뚝딱 포토부스")
+        pygame.display.set_caption(BRAND_NAME)
 
     def _update_display_transform(self):
         self.display_w, self.display_h = self.display.get_size()
@@ -1108,12 +1108,13 @@ class PhotoBooth:
             p.draw(self.screen)
 
         # 메인 타이틀
-        draw_text(self.screen, "오늘의 네컷", self.f_big, C_PINK,
+        draw_text(self.screen, EVENT_TITLE or BRAND_NAME, self.f_big, C_PINK,
                   470, 88, anchor="center",
                   shadow=True, shadow_color=C_LPINK, shadow_off=4)
 
-        draw_text(self.screen, "뚝딱 공방 포토부스", self.f_medium, C_GRAY,
-                  470, 152, anchor="center")
+        if BOOTH_SUBTITLE:
+            draw_text(self.screen, BOOTH_SUBTITLE, self.f_medium, C_GRAY,
+                      470, 152, anchor="center")
         self.btn_status.draw(self.screen, self.f_small)
 
         panel_x = 860
@@ -1168,8 +1169,9 @@ class PhotoBooth:
                       110 + box_w // 2, 1018, anchor="center")
 
         # 하단 정보
-        draw_text(self.screen, "어린이 포토부스  |  뚝딱 공방", self.f_tiny, C_LGRAY,
-                  SCREEN_W // 2, SCREEN_H - 30, anchor="center")
+        if FOOTER_TEXT:
+            draw_text(self.screen, FOOTER_TEXT, self.f_tiny, C_LGRAY,
+                      SCREEN_W // 2, SCREEN_H - 30, anchor="center")
 
     # ═══════════════════════════════════════════════
     #  COUNTDOWN 렌더링 & 업데이트
@@ -1562,7 +1564,7 @@ def _set_runtime_value(name: str, value):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="뚝딱 포토부스")
+    parser = argparse.ArgumentParser(description=BRAND_NAME)
     parser.add_argument("--test", action="store_true",
                         help="카메라 없이 테스트 모드 실행")
     parser.add_argument("--window", action="store_true",

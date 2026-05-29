@@ -162,7 +162,7 @@ def check_stats() -> bool:
 
 
 def main() -> int:
-    print("뚝딱 포토부스 Pi 점검")
+    print(f"{cfg.BRAND_NAME} Pi 점검")
     print(f"Python: {sys.version.split()[0]}")
     checks = [
         check_python_modules(),
