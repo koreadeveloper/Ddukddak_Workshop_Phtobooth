@@ -153,6 +153,7 @@ PHOTOBOOTH_PORTRAIT_ROTATION=counterclockwise
 ```bash
 PHOTOBOOTH_DEFAULT_FRAME_THEME=soft_pink  # soft_pink/classic_white/studio_black/sky_blue
 PHOTOBOOTH_DEFAULT_FILTER=bright          # original/bright/warm/cool/mono
+PHOTOBOOTH_SHOW_CROP_GUIDE=1
 PHOTOBOOTH_DEFAULT_PRINT_COPIES=1
 PHOTOBOOTH_MAX_PRINT_COPIES=3
 PHOTOBOOTH_REVIEW_TIMEOUT=120
@@ -161,6 +162,12 @@ PHOTOBOOTH_PHOTO_RETENTION_DAYS=14
 PHOTOBOOTH_MAX_STORED_PHOTOS=800
 PHOTOBOOTH_MIN_FREE_GB=1
 PHOTOBOOTH_CLEANUP_INTERVAL_SECS=3600
+```
+
+촬영 화면의 밝은 사각형은 실제 인쇄물에 남는 영역입니다. 사각형 밖은 최종 네컷 합성 과정에서 잘릴 수 있으므로 얼굴과 손동작은 사각형 안쪽에 들어오게 맞추세요. 운영 중 이 표시가 불필요하면 `.env`에서 끌 수 있습니다.
+
+```bash
+PHOTOBOOTH_SHOW_CROP_GUIDE=0
 ```
 
 리뷰 화면에서는 인쇄 매수를 `1~PHOTOBOOTH_MAX_PRINT_COPIES` 범위에서 바꿀 수 있습니다. 손님이 리뷰 화면을 오래 방치하면 `PHOTOBOOTH_REVIEW_TIMEOUT`초 뒤 대기 화면으로 자동 복귀합니다. 시작 화면의 `운영 점검`에서는 카메라 프레임, CUPS 프린터 등록, QR 서버 주소, 저장공간을 확인할 수 있습니다.

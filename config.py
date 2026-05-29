@@ -44,6 +44,7 @@ CAM_FPS    = _env_int("PHOTOBOOTH_CAM_FPS", 30)
 
 # 화면 미리보기는 거울처럼 보여 주되, 저장/인쇄 이미지는 실제 카메라 방향을 유지합니다.
 PREVIEW_MIRROR = _env_bool("PHOTOBOOTH_PREVIEW_MIRROR", True)
+SHOW_CROP_GUIDE = _env_bool("PHOTOBOOTH_SHOW_CROP_GUIDE", True)
 CAPTURE_ORIENTATION = os.getenv("PHOTOBOOTH_CAPTURE_ORIENTATION", "portrait").strip().lower()
 PORTRAIT_ROTATION = os.getenv("PHOTOBOOTH_PORTRAIT_ROTATION", "clockwise").strip().lower()
 DEFAULT_FILTER = os.getenv("PHOTOBOOTH_DEFAULT_FILTER", "bright").strip().lower()

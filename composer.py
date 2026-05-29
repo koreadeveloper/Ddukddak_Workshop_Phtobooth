@@ -97,6 +97,21 @@ def _photos_are_landscape(photos: list) -> bool:
     return w >= h
 
 
+def photo_slot_aspect(is_landscape: bool) -> float:
+    """최종 출력 시 한 컷이 들어가는 슬롯의 가로/세로 비율."""
+    margin  = 58
+    footer  = 92
+    if is_landscape:
+        gutter = 20
+        slot_h = (PRINT_H - 2 * margin - footer - 3 * gutter) // 4
+        slot_w = min(PRINT_W - 2 * margin, int(slot_h * 16 / 9))
+    else:
+        gutter = 30
+        slot_w = (PRINT_W - 2 * margin - gutter) // 2
+        slot_h = (PRINT_H - 2 * margin - gutter - footer) // 2
+    return slot_w / slot_h
+
+
 # ─── RP-108 단일 시트 생성 ─────────────────────────────
 def _make_sheet(photos: list, frame_theme_id: str | None = None) -> Image.Image:
     """4장 BGR ndarray → RP-108 한 장짜리 네컷 PIL Image"""

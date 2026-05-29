@@ -612,6 +612,63 @@ class PhotoBooth:
             frame = cv2.flip(frame, 1)
         return frame
 
+    def _draw_crop_guide(self, image_rect: pygame.Rect, frame_shape):
+        if not SHOW_CROP_GUIDE:
+            return
+
+        frame_h, frame_w = frame_shape[:2]
+        if frame_h <= 0 or frame_w <= 0 or image_rect.width <= 0 or image_rect.height <= 0:
+            return
+
+        frame_aspect = frame_w / frame_h
+        target_aspect = composer.photo_slot_aspect(frame_w >= frame_h)
+        if frame_aspect > target_aspect:
+            guide_h = image_rect.height
+            guide_w = int(guide_h * target_aspect)
+        else:
+            guide_w = image_rect.width
+            guide_h = int(guide_w / target_aspect)
+
+        guide_w = min(image_rect.width, max(1, guide_w))
+        guide_h = min(image_rect.height, max(1, guide_h))
+        guide = pygame.Rect(
+            image_rect.x + (image_rect.width - guide_w) // 2,
+            image_rect.y + (image_rect.height - guide_h) // 2,
+            guide_w,
+            guide_h,
+        )
+
+        shade = pygame.Surface((image_rect.width, image_rect.height), pygame.SRCALPHA)
+        local = guide.move(-image_rect.x, -image_rect.y)
+        shade_color = (0, 0, 0, 72)
+        pygame.draw.rect(shade, shade_color, (0, 0, image_rect.width, local.top))
+        pygame.draw.rect(shade, shade_color, (0, local.bottom, image_rect.width, image_rect.height - local.bottom))
+        pygame.draw.rect(shade, shade_color, (0, local.top, local.left, local.height))
+        pygame.draw.rect(shade, shade_color, (local.right, local.top, image_rect.width - local.right, local.height))
+        self.screen.blit(shade, image_rect.topleft)
+
+        pygame.draw.rect(self.screen, C_WHITE, guide, 4, border_radius=10)
+        pygame.draw.rect(self.screen, C_YELLOW, guide.inflate(-8, -8), 2, border_radius=8)
+
+        line_color = (255, 255, 255)
+        for i in (1, 2):
+            x = guide.left + guide.width * i // 3
+            y = guide.top + guide.height * i // 3
+            pygame.draw.line(self.screen, line_color, (x, guide.top + 12), (x, guide.bottom - 12), 1)
+            pygame.draw.line(self.screen, line_color, (guide.left + 12, y), (guide.right - 12, y), 1)
+
+    def _draw_camera_preview_fullscreen(self, frame: np.ndarray):
+        if frame is None:
+            self.screen.fill((20, 20, 30))
+            return
+        self.screen.fill((20, 20, 30))
+        display_frame = self._display_frame(frame)
+        prev = fit_bgr_to_surface(display_frame, SCREEN_W, SCREEN_H)
+        pw, ph = prev.get_size()
+        rect = pygame.Rect((SCREEN_W - pw) // 2, (SCREEN_H - ph) // 2, pw, ph)
+        self.screen.blit(prev, rect.topleft)
+        self._draw_crop_guide(rect, display_frame.shape)
+
     def _review_thumb_size(self) -> tuple[int, int]:
         if self.capture_orientation == "portrait":
             return 150, 220
@@ -1011,6 +1068,7 @@ class PhotoBooth:
             draw_rrect(self.screen, C_LPINK,
                        (px - 6, py - 6, pw + 12, ph + 12), radius=14)
             self.screen.blit(prev, (px, py))
+            self._draw_crop_guide(pygame.Rect(px, py, pw, ph), frame.shape)
             draw_text(self.screen, "지금 모습이에요", self.f_small, C_GRAY,
                       110 + box_w // 2, 1018, anchor="center")
 
@@ -1044,13 +1102,7 @@ class PhotoBooth:
     def _draw_countdown(self):
         # 카메라 프리뷰 (비율 유지)
         frame = self.camera.get_frame()
-        if frame is not None:
-            self.screen.fill((20, 20, 30))
-            prev = fit_bgr_to_surface(self._display_frame(frame), SCREEN_W, SCREEN_H)
-            pw, ph = prev.get_size()
-            self.screen.blit(prev, ((SCREEN_W - pw) // 2, (SCREEN_H - ph) // 2))
-        else:
-            self.screen.fill((20, 20, 30))
+        self._draw_camera_preview_fullscreen(frame)
 
         # 상단 반투명 바
         bar = pygame.Surface((SCREEN_W, 90), pygame.SRCALPHA)
@@ -1105,13 +1157,7 @@ class PhotoBooth:
     # ═══════════════════════════════════════════════
     def _draw_flash(self):
         frame = self.camera.get_frame()
-        if frame is not None:
-            self.screen.fill((20, 20, 30))
-            prev = fit_bgr_to_surface(self._display_frame(frame), SCREEN_W, SCREEN_H)
-            pw, ph = prev.get_size()
-            self.screen.blit(prev, ((SCREEN_W - pw) // 2, (SCREEN_H - ph) // 2))
-        else:
-            self.screen.fill((20, 20, 30))
+        self._draw_camera_preview_fullscreen(frame)
 
         # 흰 플래시 페이드아웃
         if self.flash_alpha > 0:
