@@ -33,4 +33,6 @@ chmod +x install.sh run.sh
 ./run.sh
 ```
 
+`.env.example`에는 기본 실행 설정이 들어 있습니다. `./install.sh`는 기존 `.env`를 덮어쓰지 않고 누락된 새 설정만 자동으로 추가합니다. 공백이 들어가는 문구 값은 따옴표로 감싸면 안전하고, 프로그램은 `.env`를 직접 읽으므로 `python3 doctor.py` 같은 점검 명령도 같은 설정을 사용합니다.
+
 라즈베리파이 설치, 프린터 등록, 자동 실행 설정은 [RASPBERRY_PI5_SETUP.md](RASPBERRY_PI5_SETUP.md)를 보세요.

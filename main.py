@@ -818,6 +818,11 @@ class PhotoBooth:
         """백그라운드 스레드로 스트립 합성"""
         if self._composing:
             return
+        if len(self.captured_bgr) != PHOTO_COUNT:
+            log.warning(
+                f"합성 건너뜀: 사진 {len(self.captured_bgr)}/{PHOTO_COUNT}장"
+            )
+            return
         self._composing = True
         self._compose_generation += 1
         generation = self._compose_generation

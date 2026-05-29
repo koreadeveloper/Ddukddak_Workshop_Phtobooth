@@ -82,43 +82,39 @@ echo ""
 echo "  프린터 이름 확인 후 config.py 의 PRINTER_NAME 을 수정하세요."
 echo ""
 
-if [ ! -f .env ]; then
-    cat > .env << 'EOF'
-# 뚝딱 포토부스 실행 설정
-PHOTOBOOTH_BRAND_NAME=뚝딱 포토부스
-PHOTOBOOTH_EVENT_TITLE=오늘의 네컷
-PHOTOBOOTH_BOOTH_SUBTITLE=뚝딱 공방 포토부스
-PHOTOBOOTH_FOOTER_TEXT=어린이 포토부스  |  뚝딱 공방
-PHOTOBOOTH_PRINT_BRAND_TEXT=뚝딱 포토부스
-PHOTOBOOTH_PRINT_MARK_TEXT=FOUR CUT
-PHOTOBOOTH_DOWNLOAD_PREFIX=photobooth
-PHOTOBOOTH_FULLSCREEN=1
-PHOTOBOOTH_MOUSE_VISIBLE=1
-PHOTOBOOTH_AUDIO_ENABLED=1
-PHOTOBOOTH_CAM_INDEX=0
-PHOTOBOOTH_CAM_STALE_SECS=3
-PHOTOBOOTH_CAM_RECONNECT_SECS=2
-PHOTOBOOTH_CAM_MAX_READ_FAILURES=30
-PHOTOBOOTH_SHOW_CROP_GUIDE=1
-PHOTOBOOTH_CAPTURE_ORIENTATION=portrait
-PHOTOBOOTH_PORTRAIT_ROTATION=clockwise
-PHOTOBOOTH_DEFAULT_FILTER=bright
-PHOTOBOOTH_DEFAULT_FRAME_THEME=soft_pink
-PHOTOBOOTH_DEFAULT_PRINT_LAYOUT=auto
-PHOTOBOOTH_DEFAULT_PRINT_COPIES=1
-PHOTOBOOTH_MAX_PRINT_COPIES=3
-PHOTOBOOTH_REVIEW_TIMEOUT=120
-PHOTOBOOTH_PRINT_RESULT_TIMEOUT=5
-PHOTOBOOTH_PRINT_JOB_WAIT_SECS=120
-PHOTOBOOTH_PRINT_JOB_POLL_SECS=2
-PHOTOBOOTH_PHOTO_RETENTION_DAYS=14
-PHOTOBOOTH_MAX_STORED_PHOTOS=800
-PHOTOBOOTH_MIN_FREE_GB=1
-PHOTOBOOTH_CLEANUP_INTERVAL_SECS=3600
-PHOTOBOOTH_PRINTER_NAME=Canon_CP1500
-PHOTOBOOTH_QR_PORT=8080
-EOF
+ENV_TEMPLATE=".env.example"
+if [ ! -f "$ENV_TEMPLATE" ]; then
+    echo "  ! $ENV_TEMPLATE 파일이 없어 .env 설정 생성을 건너뜁니다"
+elif [ ! -f .env ]; then
+    cp "$ENV_TEMPLATE" .env
     echo "  ✓ .env 기본 설정 파일 생성"
+else
+    backup=".env.backup.$(date +%Y%m%d%H%M%S)"
+    cp .env "$backup"
+    added=0
+    while IFS= read -r line || [ -n "$line" ]; do
+        case "$line" in
+            PHOTOBOOTH_*=*)
+                key="${line%%=*}"
+                if ! grep -qE "^[[:space:]]*(export[[:space:]]+)?${key}=" .env; then
+                    if [ "$added" -eq 0 ]; then
+                        {
+                            echo ""
+                            echo "# install.sh가 추가한 새 기본 설정"
+                        } >> .env
+                    fi
+                    echo "$line" >> .env
+                    added=$((added + 1))
+                fi
+                ;;
+        esac
+    done < "$ENV_TEMPLATE"
+    if [ "$added" -gt 0 ]; then
+        echo "  ✓ 기존 .env 유지, 누락 설정 ${added}개 추가 (백업: $backup)"
+    else
+        rm -f "$backup"
+        echo "  ✓ 기존 .env 설정 최신 상태"
+    fi
 fi
 
 # ── 실행 권한 ────────────────────────────────────

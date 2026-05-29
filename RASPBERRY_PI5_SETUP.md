@@ -151,12 +151,12 @@ PHOTOBOOTH_PORTRAIT_ROTATION=counterclockwise
 기본 프레임/필터도 `.env`에서 바꿀 수 있습니다.
 
 ```bash
-PHOTOBOOTH_BRAND_NAME=뚝딱 포토부스
-PHOTOBOOTH_EVENT_TITLE=오늘의 네컷
-PHOTOBOOTH_BOOTH_SUBTITLE=뚝딱 공방 포토부스
-PHOTOBOOTH_FOOTER_TEXT=어린이 포토부스  |  뚝딱 공방
-PHOTOBOOTH_PRINT_BRAND_TEXT=뚝딱 포토부스
-PHOTOBOOTH_PRINT_MARK_TEXT=FOUR CUT
+PHOTOBOOTH_BRAND_NAME="뚝딱 포토부스"
+PHOTOBOOTH_EVENT_TITLE="오늘의 네컷"
+PHOTOBOOTH_BOOTH_SUBTITLE="뚝딱 공방 포토부스"
+PHOTOBOOTH_FOOTER_TEXT="어린이 포토부스  |  뚝딱 공방"
+PHOTOBOOTH_PRINT_BRAND_TEXT="뚝딱 포토부스"
+PHOTOBOOTH_PRINT_MARK_TEXT="FOUR CUT"
 PHOTOBOOTH_DOWNLOAD_PREFIX=photobooth
 PHOTOBOOTH_DEFAULT_FRAME_THEME=soft_pink  # soft_pink/classic_white/studio_black/sky_blue
 PHOTOBOOTH_DEFAULT_FILTER=bright          # original/bright/warm/cool/mono
@@ -177,7 +177,7 @@ PHOTOBOOTH_MIN_FREE_GB=1
 PHOTOBOOTH_CLEANUP_INTERVAL_SECS=3600
 ```
 
-행사명이나 기관명을 바꾸려면 위 브랜딩 값을 수정하세요. `PHOTOBOOTH_PRINT_BRAND_TEXT`는 인쇄물 하단 문구, `PHOTOBOOTH_DOWNLOAD_PREFIX`는 QR 다운로드 파일명 앞부분에 사용됩니다.
+행사명이나 기관명을 바꾸려면 위 브랜딩 값을 수정하세요. 공백이 들어가는 값은 위 예시처럼 따옴표로 감싸는 것이 안전합니다. `PHOTOBOOTH_PRINT_BRAND_TEXT`는 인쇄물 하단 문구, `PHOTOBOOTH_DOWNLOAD_PREFIX`는 QR 다운로드 파일명 앞부분에 사용됩니다.
 
 촬영 화면의 밝은 사각형은 실제 인쇄물에 남는 영역입니다. 사각형 밖은 최종 네컷 합성 과정에서 잘릴 수 있으므로 얼굴과 손동작은 사각형 안쪽에 들어오게 맞추세요. 운영 중 이 표시가 불필요하면 `.env`에서 끌 수 있습니다.
 
@@ -215,8 +215,11 @@ git status --short
 git stash push -m "backup pi local install changes" -- install.sh
 git pull origin main
 chmod +x install.sh run.sh
+./install.sh
 git log --oneline -1
 ```
+
+`./install.sh`는 기존 `.env` 값을 덮어쓰지 않고, 새 버전에서 추가된 `PHOTOBOOTH_...` 설정만 `.env` 끝에 붙입니다. 실행 전 `.env.backup.날짜` 파일도 남기므로 현장 설정을 되돌릴 수 있습니다.
 
 `git pull`에서 다른 파일 충돌이 나오면 그 파일도 로컬에서 바뀐 상태입니다. 직접 고친 내용이 아니라면 아래처럼 전체 백업 후 다시 받습니다.
 

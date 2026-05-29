@@ -151,7 +151,8 @@ def _make_sheet(
     layout_id: str | None = None,
 ) -> Image.Image:
     """4장 BGR ndarray → RP-108 한 장짜리 네컷 PIL Image"""
-    assert len(photos) == 4
+    if len(photos) != 4:
+        raise ValueError(f"compose requires exactly 4 photos, got {len(photos)}")
     theme = get_frame_theme(frame_theme_id)
     is_landscape = _photos_are_landscape(photos)
     layout, slot_w, slot_h, coords = _slot_layout(is_landscape, layout_id)

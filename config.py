@@ -1,7 +1,66 @@
 # -*- coding: utf-8 -*-
 """뚝딱 포토부스 - 설정 파일"""
 import os
+import re
 from pathlib import Path
+
+
+BASE_DIR = Path(__file__).parent
+_ENV_KEY_RE = re.compile(r"^PHOTOBOOTH_[A-Z0-9_]+$")
+
+
+def _parse_env_value(raw_value: str) -> str:
+    value = raw_value.strip().rstrip("\r")
+    if not value:
+        return ""
+
+    if value[0] in {"'", '"'}:
+        quote = value[0]
+        chars = []
+        escaped = False
+        for ch in value[1:]:
+            if quote == '"' and escaped:
+                chars.append(ch)
+                escaped = False
+                continue
+            if quote == '"' and ch == "\\":
+                escaped = True
+                continue
+            if ch == quote:
+                return "".join(chars)
+            chars.append(ch)
+        return "".join(chars)
+
+    comment_at = value.find(" #")
+    if comment_at >= 0:
+        value = value[:comment_at].rstrip()
+    return value
+
+
+def _load_env_file(path: Path):
+    if not path.exists():
+        return
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return
+
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[7:].lstrip()
+        if "=" not in line:
+            continue
+        key, raw_value = line.split("=", 1)
+        key = key.strip()
+        if not _ENV_KEY_RE.fullmatch(key):
+            continue
+        os.environ.setdefault(key, _parse_env_value(raw_value))
+
+
+_load_env_file(BASE_DIR / ".env")
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -54,7 +113,7 @@ AUDIO_ENABLED     = _env_bool("PHOTOBOOTH_AUDIO_ENABLED", True)
 
 # ─── 카메라 ──────────────────────────────────────────
 CAM_INDEX  = _env_int("PHOTOBOOTH_CAM_INDEX", 0)
-CAM_DEVICE = os.getenv("PHOTOBOOTH_CAM_DEVICE", "").strip()
+CAM_DEVICE = _env_text("PHOTOBOOTH_CAM_DEVICE", "")
 CAM_W      = _env_int("PHOTOBOOTH_CAM_W", 1280)
 CAM_H      = _env_int("PHOTOBOOTH_CAM_H", 720)
 CAM_FPS    = _env_int("PHOTOBOOTH_CAM_FPS", 30)
@@ -65,11 +124,11 @@ CAM_MAX_READ_FAILURES = _env_int("PHOTOBOOTH_CAM_MAX_READ_FAILURES", 30)
 # 화면 미리보기는 거울처럼 보여 주되, 저장/인쇄 이미지는 실제 카메라 방향을 유지합니다.
 PREVIEW_MIRROR = _env_bool("PHOTOBOOTH_PREVIEW_MIRROR", True)
 SHOW_CROP_GUIDE = _env_bool("PHOTOBOOTH_SHOW_CROP_GUIDE", True)
-CAPTURE_ORIENTATION = os.getenv("PHOTOBOOTH_CAPTURE_ORIENTATION", "portrait").strip().lower()
-PORTRAIT_ROTATION = os.getenv("PHOTOBOOTH_PORTRAIT_ROTATION", "clockwise").strip().lower()
-DEFAULT_FILTER = os.getenv("PHOTOBOOTH_DEFAULT_FILTER", "bright").strip().lower()
-DEFAULT_FRAME_THEME = os.getenv("PHOTOBOOTH_DEFAULT_FRAME_THEME", "soft_pink").strip().lower()
-DEFAULT_PRINT_LAYOUT = os.getenv("PHOTOBOOTH_DEFAULT_PRINT_LAYOUT", "auto").strip().lower()
+CAPTURE_ORIENTATION = _env_text("PHOTOBOOTH_CAPTURE_ORIENTATION", "portrait").lower()
+PORTRAIT_ROTATION = _env_text("PHOTOBOOTH_PORTRAIT_ROTATION", "clockwise").lower()
+DEFAULT_FILTER = _env_text("PHOTOBOOTH_DEFAULT_FILTER", "bright").lower()
+DEFAULT_FRAME_THEME = _env_text("PHOTOBOOTH_DEFAULT_FRAME_THEME", "soft_pink").lower()
+DEFAULT_PRINT_LAYOUT = _env_text("PHOTOBOOTH_DEFAULT_PRINT_LAYOUT", "auto").lower()
 
 # ─── 촬영 흐름 ───────────────────────────────────────
 PHOTO_COUNT      = 4     # 한 세션에 찍을 장수
@@ -80,7 +139,7 @@ REVIEW_TIMEOUT   = _env_int("PHOTOBOOTH_REVIEW_TIMEOUT", 120)
 PRINT_RESULT_TIMEOUT = _env_int("PHOTOBOOTH_PRINT_RESULT_TIMEOUT", 5)
 
 # ─── 인쇄 ────────────────────────────────────────────
-PRINTER_NAME = os.getenv("PHOTOBOOTH_PRINTER_NAME", "Canon_CP1500")
+PRINTER_NAME = _env_text("PHOTOBOOTH_PRINTER_NAME", "Canon_CP1500")
 DEFAULT_PRINT_COPIES = _env_int("PHOTOBOOTH_DEFAULT_PRINT_COPIES", 1)
 MAX_PRINT_COPIES = _env_int("PHOTOBOOTH_MAX_PRINT_COPIES", 3)
 PRINT_JOB_WAIT_SECS = _env_int("PHOTOBOOTH_PRINT_JOB_WAIT_SECS", 120)
@@ -96,7 +155,6 @@ CLEANUP_INTERVAL_SECS = _env_int("PHOTOBOOTH_CLEANUP_INTERVAL_SECS", 3600)
 QR_SERVER_PORT = _env_int("PHOTOBOOTH_QR_PORT", 8080)
 
 # ─── 경로 ────────────────────────────────────────────
-BASE_DIR   = Path(__file__).parent
 PHOTOS_DIR = BASE_DIR / "photos"
 ASSETS_DIR = BASE_DIR / "assets"
 

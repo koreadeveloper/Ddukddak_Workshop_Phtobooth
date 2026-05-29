@@ -5,10 +5,40 @@ cd "$SCRIPT_DIR"
 
 # .env 설정 로드
 if [ -f "$SCRIPT_DIR/.env" ]; then
-    set -a
-    # shellcheck disable=SC1091
-    source "$SCRIPT_DIR/.env"
-    set +a
+    while IFS= read -r line || [ -n "$line" ]; do
+        line="${line%$'\r'}"
+        line="${line#"${line%%[![:space:]]*}"}"
+        line="${line%"${line##*[![:space:]]}"}"
+        case "$line" in
+            ""|\#*) continue ;;
+            export\ *) line="${line#export }" ;;
+        esac
+        case "$line" in
+            PHOTOBOOTH_*=*)
+                key="${line%%=*}"
+                value="${line#*=}"
+                key="${key#"${key%%[![:space:]]*}"}"
+                key="${key%"${key##*[![:space:]]}"}"
+                case "$key" in
+                    ""|*[!A-Za-z0-9_]*) continue ;;
+                esac
+
+                value="${value#"${value%%[![:space:]]*}"}"
+                value="${value%"${value##*[![:space:]]}"}"
+                if [[ "$value" == \"* ]]; then
+                    value="${value#\"}"
+                    value="${value%%\"*}"
+                elif [[ "$value" == \'* ]]; then
+                    value="${value#\'}"
+                    value="${value%%\'*}"
+                else
+                    value="${value%% #*}"
+                    value="${value%"${value##*[![:space:]]}"}"
+                fi
+                export "$key=$value"
+                ;;
+        esac
+    done < "$SCRIPT_DIR/.env"
 fi
 
 export PYTHONUNBUFFERED=1
