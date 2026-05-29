@@ -422,7 +422,7 @@ class PhotoBooth:
     #  세션 초기화
     # ─────────────────────────────────────────────────
     def _reset_session(self):
-        self.session_id     = str(uuid.uuid4())[:8]
+        self.session_id     = uuid.uuid4().hex[:12]
         self.captured_raw_bgr = []      # 방향만 보정된 원본 BGR ndarray 목록
         self.captured_bgr   = []        # BGR ndarray 목록
         self.strip_path     = None
@@ -1470,6 +1470,10 @@ class PhotoBooth:
                       self.f_medium, C_DARK,
                       SCREEN_W // 2, dy, anchor="center")
             dy += 44
+            draw_text(self.screen, "미리보기 화면에서 사진 다운로드 버튼을 누르세요",
+                      self.f_small, C_DARK,
+                      SCREEN_W // 2, dy, anchor="center")
+            dy += 34
             draw_text(self.screen, self.qr_url, self.f_small, C_GRAY,
                       SCREEN_W // 2, dy, anchor="center")
             dy += 36
