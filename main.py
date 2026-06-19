@@ -162,6 +162,16 @@ def draw_rrect(surface, color, rect, radius=20, border=0, bcol=None):
         pygame.draw.rect(surface, bcol, rect, border, border_radius=radius)
 
 
+def draw_card(surface, rect, radius=18):
+    shadow = pygame.Surface((rect.width + 12, rect.height + 12), pygame.SRCALPHA)
+    pygame.draw.rect(
+        shadow, (40, 30, 50, 24), shadow.get_rect().inflate(-6, -6),
+        border_radius=radius
+    )
+    surface.blit(shadow, (rect.x - 2, rect.y + 4))
+    draw_rrect(surface, C_WHITE, rect, radius=radius, border=1, bcol=(224, 224, 230))
+
+
 def make_beep(freq=440, duration=0.12, volume=0.55, sr=44100):
     """단순 사인파 사운드 생성"""
     n = int(sr * duration)
@@ -180,7 +190,7 @@ def make_beep(freq=440, duration=0.12, volume=0.55, sr=44100):
 # ════════════════════════════════════════════════════
 class Button:
     def __init__(self, x, y, w, h, label, color,
-                 text_color=C_WHITE, radius=22):
+                 text_color=C_WHITE, radius=22, border_color=None, border_width=0):
         self.rect       = pygame.Rect(x, y, w, h)
         self.label      = label
         self.color      = color
@@ -188,6 +198,8 @@ class Button:
         self.press_col  = tuple(max(c - 30, 0) for c in color)
         self.text_color = text_color
         self.radius     = radius
+        self.border_color = border_color
+        self.border_width = border_width
         self._hov       = False
         self._pressed   = False
 
@@ -196,6 +208,15 @@ class Button:
         self.hover_col = tuple(min(c + 25, 255) for c in color)
         self.press_col = tuple(max(c - 30, 0) for c in color)
 
+    def set_style(self, color, text_color=None, border_color=None, border_width=None):
+        self.set_color(color)
+        if text_color is not None:
+            self.text_color = text_color
+        if border_color is not None:
+            self.border_color = border_color
+        if border_width is not None:
+            self.border_width = border_width
+
     def update(self, mpos, pressed=False):
         self._hov     = self.rect.collidepoint(mpos)
         self._pressed = pressed and self._hov
@@ -203,7 +224,8 @@ class Button:
     def draw(self, surf, font):
         col = self.press_col if self._pressed else (
               self.hover_col if self._hov else self.color)
-        draw_rrect(surf, col, self.rect, self.radius)
+        draw_rrect(surf, col, self.rect, self.radius,
+                   self.border_width, self.border_color)
         draw_text(surf, self.label, font, self.text_color,
                   self.rect.centerx, self.rect.centery, anchor="center",
                   max_width=self.rect.width - 24)
@@ -297,6 +319,78 @@ class PhotoBooth:
             scaled = pygame.transform.scale(self.screen, (self.ui_w, self.ui_h))
         self.display.blit(scaled, (self.ui_x, self.ui_y))
         pygame.display.flip()
+
+    def _compact_review_layout(self):
+        margin = max(24, int(SCREEN_W * 0.031))
+        gap = 18
+        action_h = 58
+        action_y = SCREEN_H - action_h - 22
+        card_top = 104 if SCREEN_H >= 720 else 88
+        card_bottom = action_y - 34
+        card_h = max(430, card_bottom - card_top)
+
+        left_w = min(400, max(340, int(SCREEN_W * 0.39)))
+        right_x = margin + left_w + gap
+        right_w = SCREEN_W - margin - right_x
+        if right_w < 520:
+            left_w = max(330, SCREEN_W - margin * 2 - gap - 520)
+            right_x = margin + left_w + gap
+            right_w = SCREEN_W - margin - right_x
+
+        left_card = pygame.Rect(margin, card_top, left_w, card_h)
+        right_card = pygame.Rect(right_x, card_top, right_w, card_h)
+
+        preview_h = min(
+            card_h - 92,
+            int(max(260, left_w - 72) * composer.PRINT_H / composer.PRINT_W),
+        )
+        preview_h = max(330, preview_h)
+
+        inner_x = right_card.x + 28
+        inner_right = right_card.right - 28
+        thumb_gap = 12
+        thumb_w = min(104, max(90, int((right_w * 0.40 - thumb_gap) / 2)))
+        thumb_h = max(70, int(thumb_w * 0.68))
+        portrait_thumb_w = max(76, int(thumb_w * 0.74))
+        portrait_thumb_h = max(108, int(portrait_thumb_w * 1.45))
+
+        thumb_grid_x = inner_x
+        thumb_grid_y = right_card.y + 88
+        divider_x = thumb_grid_x + 2 * thumb_w + thumb_gap + 24
+        control_x = divider_x + 26
+        choice_gap = 12
+        choice_w = max(88, (inner_right - control_x - choice_gap) // 2)
+
+        filter_gap = 10
+        filter_w = max(78, (right_card.width - 56 - filter_gap * 4) // 5)
+        action_gap = 30
+        action_w = (SCREEN_W - margin * 2 - action_gap * 2) // 3
+        action_x = margin
+
+        return {
+            "left_card": left_card,
+            "right_card": right_card,
+            "preview_h": preview_h,
+            "thumb_gap": thumb_gap,
+            "thumb_grid_x": thumb_grid_x,
+            "thumb_grid_y": thumb_grid_y,
+            "thumb_w": thumb_w,
+            "thumb_h": thumb_h,
+            "portrait_thumb_w": portrait_thumb_w,
+            "portrait_thumb_h": portrait_thumb_h,
+            "divider_x": divider_x,
+            "control_x": control_x,
+            "choice_w": choice_w,
+            "choice_gap": choice_gap,
+            "filter_x": inner_x,
+            "filter_w": filter_w,
+            "filter_gap": filter_gap,
+            "action_x": action_x,
+            "action_y": action_y,
+            "action_w": action_w,
+            "action_h": action_h,
+            "action_gap": action_gap,
+        }
 
     def __init__(self, test_mode: bool = False):
         pygame.init()
@@ -421,39 +515,62 @@ class PhotoBooth:
         self.review_frame_buttons = []
         self.review_filter_buttons = []
         if self.compact_ui:
-            panel_x = max(0, SCREEN_W - 334)
-            col_w, col_gap = 146, 16
+            layout = self._compact_review_layout()
+            panel_x = layout["control_x"]
+            col_w = layout["choice_w"]
+            col_gap = layout["choice_gap"]
             button_h = 42
             for i, (theme_id, theme) in enumerate(composer.FRAME_THEMES.items()):
                 x = panel_x + (i % 2) * (col_w + col_gap)
-                y = 116 + (i // 2) * 50
+                y = layout["right_card"].y + 88 + (i // 2) * 50
                 self.review_frame_buttons.append(
-                    (theme_id, Button(x, y, col_w, button_h, theme["name"], (110, 110, 120), radius=14))
+                    (theme_id, Button(x, y, col_w, button_h, theme["name"], C_WHITE,
+                                      C_DARK, radius=14, border_color=C_LGRAY, border_width=2))
                 )
             self.review_orientation_buttons = [
-                ("portrait", Button(panel_x, 280, col_w, button_h, "세로", (110, 110, 120), radius=14)),
-                ("landscape", Button(panel_x + col_w + col_gap, 280, col_w, button_h, "가로", (110, 110, 120), radius=14)),
+                ("portrait", Button(panel_x, layout["right_card"].y + 258, col_w, button_h,
+                                    "세로", C_WHITE, C_DARK, radius=14,
+                                    border_color=C_LGRAY, border_width=2)),
+                ("landscape", Button(panel_x + col_w + col_gap, layout["right_card"].y + 258,
+                                     col_w, button_h, "가로", C_WHITE, C_DARK, radius=14,
+                                     border_color=C_LGRAY, border_width=2)),
             ]
             for i, (filter_id, meta) in enumerate(FILTERS.items()):
-                x = panel_x + (i % 2) * (col_w + col_gap)
-                y = 390 + (i // 2) * 50
+                x = layout["filter_x"] + i * (layout["filter_w"] + layout["filter_gap"])
+                y = layout["right_card"].y + 384
                 self.review_filter_buttons.append(
-                    (filter_id, Button(x, y, col_w, button_h, meta["name"], (110, 110, 120), radius=14))
+                    (filter_id, Button(x, y, layout["filter_w"], button_h, meta["name"],
+                                       C_WHITE, C_DARK, radius=14,
+                                       border_color=C_LGRAY, border_width=2))
                 )
 
-            bw, bh, gap = 280, 54, 28
-            total = 3 * bw + 2 * gap
-            bx = max(24, (SCREEN_W - total) // 2)
-            by = SCREEN_H - 70
-            self.btn_print  = Button(bx,            by, bw, bh, "인쇄하기",  C_PINK, radius=18)
-            self.btn_qr     = Button(bx + bw + gap, by, bw, bh, "QR 받기",  C_BLUE, radius=18)
-            self.btn_retake = Button(bx+2*(bw+gap), by, bw, bh, "전체 다시 찍기",
-                                     (110, 110, 120), radius=18)
+            bw = layout["action_w"]
+            bh = layout["action_h"]
+            gap = layout["action_gap"]
+            bx = layout["action_x"]
+            by = layout["action_y"]
+            self.btn_retake = Button(bx,            by, bw, bh, "다시 찍기",
+                                     C_WHITE, C_PINK, radius=18,
+                                     border_color=C_PINK, border_width=2)
+            self.btn_qr     = Button(bx + bw + gap, by, bw, bh, "QR 저장",
+                                     C_WHITE, C_DARK, radius=18,
+                                     border_color=C_LGRAY, border_width=2)
+            self.btn_print  = Button(bx+2*(bw+gap), by, bw, bh, "인쇄하기",  C_PINK, radius=18)
             self.btn_retake_selected = Button(
-                398, 318, 270, 50, "선택 컷 다시 찍기", C_BLUE, radius=16
+                layout["thumb_grid_x"],
+                layout["thumb_grid_y"] + 2 * (layout["thumb_h"] + layout["thumb_gap"]) + 20,
+                2 * layout["thumb_w"] + layout["thumb_gap"], 44,
+                "선택 컷 다시 찍기", C_WHITE, C_DARK, radius=14,
+                border_color=C_LGRAY, border_width=2
             )
-            self.btn_copies_minus = Button(panel_x, 606, 54, 48, "-", (110, 110, 120), radius=14)
-            self.btn_copies_plus = Button(panel_x + 2 * (col_w + col_gap) - 54, 606, 54, 48, "+", C_BLUE, radius=14)
+            copies_y = layout["right_card"].y + 492
+            copies_mid = layout["right_card"].x + layout["right_card"].width // 2
+            self.btn_copies_minus = Button(copies_mid - 86, copies_y, 46, 46, "-",
+                                           C_WHITE, C_PINK, radius=12,
+                                           border_color=C_PINK, border_width=2)
+            self.btn_copies_plus = Button(copies_mid + 40, copies_y, 46, 46, "+",
+                                          C_WHITE, C_PINK, radius=12,
+                                          border_color=C_PINK, border_width=2)
             self.btn_status_close = Button(
                 SCREEN_W // 2 - 140, SCREEN_H - 92, 280, 58, "돌아가기", C_BLUE, radius=18
             )
@@ -479,15 +596,19 @@ class PhotoBooth:
             total = 3 * bw + 2 * gap
             bx = (SCREEN_W - total) // 2
             by = SCREEN_H - 115
-            self.btn_print  = Button(bx,            by, bw, bh, "인쇄하기",  C_PINK)
-            self.btn_qr     = Button(bx + bw + gap, by, bw, bh, "QR 받기",  C_BLUE)
-            self.btn_retake = Button(bx+2*(bw+gap), by, bw, bh, "전체 다시 찍기",
-                                     (110, 110, 120))
+            self.btn_retake = Button(bx,            by, bw, bh, "다시 찍기",
+                                     C_WHITE, C_PINK, border_color=C_PINK, border_width=2)
+            self.btn_qr     = Button(bx + bw + gap, by, bw, bh, "QR 저장",
+                                     C_WHITE, C_DARK, border_color=C_LGRAY, border_width=2)
+            self.btn_print  = Button(bx+2*(bw+gap), by, bw, bh, "인쇄하기",  C_PINK)
             self.btn_retake_selected = Button(
-                700, 660, 316, 64, "선택 컷 다시 찍기", C_BLUE, radius=18
+                700, 660, 316, 64, "선택 컷 다시 찍기", C_WHITE, C_DARK, radius=18,
+                border_color=C_LGRAY, border_width=2
             )
-            self.btn_copies_minus = Button(1120, 760, 70, 58, "-", (110, 110, 120), radius=16)
-            self.btn_copies_plus = Button(1490, 760, 70, 58, "+", C_BLUE, radius=16)
+            self.btn_copies_minus = Button(1120, 760, 70, 58, "-", C_WHITE, C_PINK,
+                                           radius=16, border_color=C_PINK, border_width=2)
+            self.btn_copies_plus = Button(1490, 760, 70, 58, "+", C_WHITE, C_PINK,
+                                          radius=16, border_color=C_PINK, border_width=2)
             self.btn_status_close = Button(
                 SCREEN_W // 2 - 165, SCREEN_H - 140, 330, 72, "돌아가기", C_BLUE, radius=20
             )
@@ -586,6 +707,13 @@ class PhotoBooth:
         if copies != self.print_copies:
             log.info(f"인쇄 매수 변경: {self.print_copies} → {copies}")
         self.print_copies = copies
+
+    def _return_to_review_from_qr(self):
+        if self.strip_path and self.strip_path.exists() and len(self.captured_raw_bgr) == PHOTO_COUNT:
+            self._set_state(St.REVIEW)
+        else:
+            self._set_state(St.IDLE)
+            self._reset_session()
 
     def _photo_files(self):
         if not PHOTOS_DIR.exists():
@@ -706,9 +834,10 @@ class PhotoBooth:
     def _review_thumb_rects(self):
         tw, th = self._review_thumb_size()
         if self.compact_ui:
-            gap = 12
-            grid_x = 398
-            grid_y = 116
+            layout = self._compact_review_layout()
+            gap = layout["thumb_gap"]
+            grid_x = layout["thumb_grid_x"]
+            grid_y = layout["thumb_grid_y"]
         else:
             gap    = 16
             grid_x = 700
@@ -805,16 +934,17 @@ class PhotoBooth:
 
     def _review_thumb_size(self) -> tuple[int, int]:
         if self.compact_ui:
+            layout = self._compact_review_layout()
             if self.capture_orientation == "portrait":
-                return 82, 122
-            return 128, 84
+                return layout["portrait_thumb_w"], layout["portrait_thumb_h"]
+            return layout["thumb_w"], layout["thumb_h"]
         if self.capture_orientation == "portrait":
             return 150, 220
         return 230, 150
 
     def _print_preview_target_h(self) -> int:
         if self.compact_ui:
-            return min(520, max(360, SCREEN_H - 240))
+            return self._compact_review_layout()["preview_h"]
         return 820
 
     def _refresh_processed_photos(self):
@@ -1047,8 +1177,7 @@ class PhotoBooth:
                     else:
                         self._begin_countdown()
                 elif self.state == St.QR_SHOW:
-                    self._set_state(St.IDLE)
-                    self._reset_session()
+                    self._return_to_review_from_qr()
                 elif self.state == St.STATUS:
                     self._set_state(St.IDLE)
 
@@ -1149,8 +1278,7 @@ class PhotoBooth:
                 self._begin_countdown(new_session=True)
 
         elif self.state == St.QR_SHOW:
-            self._set_state(St.IDLE)
-            self._reset_session()
+            self._return_to_review_from_qr()
 
         elif self.state == St.PRINTING and self._print_done:
             self._finish_print_result()
@@ -1164,7 +1292,10 @@ class PhotoBooth:
     # ═══════════════════════════════════════════════
     def _draw_selected_button_group(self, selected_id, buttons, active_color=C_BLUE):
         for item_id, btn in buttons:
-            btn.set_color(active_color if item_id == selected_id else (110, 110, 120))
+            if item_id == selected_id:
+                btn.set_style(active_color, C_WHITE, border_width=0)
+            else:
+                btn.set_style(C_WHITE, C_DARK, border_color=C_LGRAY, border_width=2)
             btn.draw(self.screen, self.f_small)
 
     def _draw_idle(self, dt):
@@ -1357,34 +1488,51 @@ class PhotoBooth:
     # ═══════════════════════════════════════════════
     def _draw_review_compact(self):
         self.screen.fill(C_BG)
+        layout = self._compact_review_layout()
+        left_card = layout["left_card"]
+        right_card = layout["right_card"]
 
-        draw_text(self.screen, "최종 사진 확인", self.f_large, C_PINK,
+        draw_text(self.screen, "사진 확인", self.f_big, C_PINK,
                   SCREEN_W // 2, 34, anchor="center", max_width=760)
+        draw_text(self.screen, "원하는 컷과 스타일을 선택하세요",
+                  self.f_tiny, C_GRAY, SCREEN_W // 2, 76,
+                  anchor="center", max_width=760)
 
-        preview_x = 24
-        preview_y = 88
+        draw_card(self.screen, left_card, radius=16)
+        draw_card(self.screen, right_card, radius=16)
+
+        preview_x = left_card.centerx
+        preview_y = left_card.y + 36
         if self.strip_surface:
             sw, sh = self.strip_surface.get_size()
-            draw_rrect(self.screen, C_DARK,
-                       (preview_x - 7, preview_y - 7, sw + 14, sh + 14), radius=12)
-            self.screen.blit(self.strip_surface, (preview_x, preview_y))
+            px = preview_x - sw // 2
+            draw_rrect(self.screen, C_LPINK,
+                       (px - 8, preview_y - 8, sw + 16, sh + 16), radius=12)
+            self.screen.blit(self.strip_surface, (px, preview_y))
         else:
-            cx = preview_x + 180
-            cy = preview_y + 260
+            cx = left_card.centerx
+            cy = left_card.centery
             dots = "." * (int(time.time() * 2.5) % 4)
             draw_text(self.screen, f"합성 중{dots}", self.f_medium, C_GRAY,
-                      cx, cy, anchor="center", max_width=340)
+                      cx, cy, anchor="center", max_width=left_card.width - 60)
+
+        theme_name = composer.FRAME_THEMES[self.selected_frame_theme]["name"]
+        filter_name = FILTERS[self.selected_filter]["name"]
+        draw_text(self.screen, f"{theme_name} 프레임 · {filter_name} 필터 · 2x2 · {self.print_copies}장",
+                  self.f_small, C_DARK, left_card.centerx, left_card.bottom - 38,
+                  anchor="center", max_width=left_card.width - 46)
 
         rects = self._review_thumb_rects()
         draw_text(self.screen, "촬영 컷", self.f_medium, C_DARK,
-                  rects[0].x, 80, anchor="topleft", max_width=260)
+                  rects[0].x, right_card.y + 36, anchor="topleft", max_width=260)
 
         if self.thumb_surfaces:
             for i, surf in enumerate(self.thumb_surfaces[:4]):
                 rect = rects[i]
-                border_color = C_BLUE if i == self.selected_retake_index else C_LGRAY
-                draw_rrect(self.screen, border_color,
-                           (rect.x - 5, rect.y - 5, rect.w + 10, rect.h + 10), radius=10)
+                border_color = C_PINK if i == self.selected_retake_index else C_LGRAY
+                draw_rrect(self.screen, C_WHITE,
+                           (rect.x - 6, rect.y - 6, rect.w + 12, rect.h + 12),
+                           radius=12, border=3, bcol=border_color)
                 self.screen.blit(surf, rect.topleft)
                 draw_rrect(self.screen, C_PINK,
                            (rect.x + 4, rect.y + 4, 28, 28), radius=14)
@@ -1392,38 +1540,56 @@ class PhotoBooth:
                           rect.x + 18, rect.y + 18, anchor="center")
         else:
             for i, rect in enumerate(rects):
-                border_color = C_BLUE if i == self.selected_retake_index else C_LGRAY
-                draw_rrect(self.screen, border_color, rect, radius=10)
+                border_color = C_PINK if i == self.selected_retake_index else C_LGRAY
+                draw_rrect(self.screen, C_WHITE, rect, radius=10,
+                           border=2, bcol=border_color)
 
-        draw_text(self.screen, "다시 찍을 컷을 선택하세요.",
-                  self.f_tiny, C_GRAY, rects[0].x + 135, 300, anchor="center",
-                  max_width=280)
         self.btn_retake_selected.draw(self.screen, self.f_small)
 
-        panel_x = self.review_frame_buttons[0][1].rect.x
+        divider_x = layout["divider_x"]
+        pygame.draw.line(
+            self.screen, C_LGRAY,
+            (divider_x, right_card.y + 42),
+            (divider_x, right_card.y + 292),
+            2,
+        )
+
+        panel_x = layout["control_x"]
         draw_text(self.screen, "프레임", self.f_medium, C_DARK,
-                  panel_x, 80, anchor="topleft", max_width=310)
+                  panel_x, right_card.y + 42, anchor="topleft", max_width=250)
         self._draw_selected_button_group(
             self.selected_frame_theme, self.review_frame_buttons, C_PINK)
 
+        pygame.draw.line(
+            self.screen, C_LGRAY,
+            (panel_x, right_card.y + 210),
+            (right_card.right - 28, right_card.y + 210),
+            1,
+        )
         draw_text(self.screen, "촬영 방향", self.f_medium, C_DARK,
-                  panel_x, 244, anchor="topleft", max_width=310)
+                  panel_x, right_card.y + 222, anchor="topleft", max_width=250)
         self._draw_selected_button_group(
             self.capture_orientation, self.review_orientation_buttons, C_BLUE)
 
+        pygame.draw.line(
+            self.screen, C_LGRAY,
+            (right_card.x + 24, right_card.y + 326),
+            (right_card.right - 24, right_card.y + 326),
+            1,
+        )
         draw_text(self.screen, "필터", self.f_medium, C_DARK,
-                  panel_x, 354, anchor="topleft", max_width=310)
+                  layout["filter_x"], right_card.y + 348, anchor="topleft", max_width=280)
         self._draw_selected_button_group(
             self.selected_filter, self.review_filter_buttons, C_BLUE)
 
-        theme_name = composer.FRAME_THEMES[self.selected_frame_theme]["name"]
-        filter_name = FILTERS[self.selected_filter]["name"]
-        draw_text(self.screen, f"{theme_name} · {filter_name} · 2x2 고정",
-                  self.f_tiny, C_GRAY, panel_x + 154, 548, anchor="center",
-                  max_width=310)
-
+        pygame.draw.line(
+            self.screen, C_LGRAY,
+            (right_card.x + 24, right_card.y + 452),
+            (right_card.right - 24, right_card.y + 452),
+            1,
+        )
         draw_text(self.screen, "인쇄 매수", self.f_medium, C_DARK,
-                  panel_x, 560, anchor="topleft", max_width=200)
+                  layout["filter_x"], right_card.y + 454, anchor="topleft", max_width=200)
         self.btn_copies_minus.draw(self.screen, self.f_large)
         self.btn_copies_plus.draw(self.screen, self.f_large)
         copies_center_x = (self.btn_copies_minus.rect.right + self.btn_copies_plus.rect.left) // 2
@@ -1431,7 +1597,10 @@ class PhotoBooth:
                   copies_center_x, self.btn_copies_minus.rect.centery, anchor="center",
                   max_width=150)
 
-        for btn in (self.btn_print, self.btn_qr, self.btn_retake):
+        self.btn_retake.set_style(C_WHITE, C_PINK, border_color=C_PINK, border_width=2)
+        self.btn_qr.set_style(C_WHITE, C_DARK, border_color=C_LGRAY, border_width=2)
+        self.btn_print.set_style(C_PINK, C_WHITE, border_width=0)
+        for btn in (self.btn_retake, self.btn_qr, self.btn_print):
             btn.draw(self.screen, self.f_medium)
 
         if self._composing:
@@ -1444,12 +1613,12 @@ class PhotoBooth:
 
         if self.review_notice and time.time() < self.review_notice_until:
             draw_text(self.screen, self.review_notice, self.f_small, C_PINK,
-                      SCREEN_W // 2, SCREEN_H - 94, anchor="center",
+                      SCREEN_W // 2, layout["action_y"] - 18, anchor="center",
                       max_width=840)
 
         remain = max(0, REVIEW_TIMEOUT - int(time.time() - self.state_time))
         draw_text(self.screen, f"{remain}초 후 자동 초기화",
-                  self.f_tiny, C_GRAY, SCREEN_W - 106, 56,
+                  self.f_tiny, C_GRAY, SCREEN_W - 110, SCREEN_H - 16,
                   anchor="center", max_width=210)
         if remain <= 0:
             self._set_state(St.IDLE)
@@ -1540,7 +1709,7 @@ class PhotoBooth:
                   1340, 790, anchor="center")
 
         # ── 하단 버튼 ──────────────────────────────────
-        for btn in (self.btn_print, self.btn_qr, self.btn_retake):
+        for btn in (self.btn_retake, self.btn_qr, self.btn_print):
             btn.draw(self.screen, self.f_medium)
 
         # 합성 중 출력/공유/재촬영 버튼 딤처리
@@ -1659,12 +1828,23 @@ class PhotoBooth:
                   SCREEN_W // 2, 50, anchor="center", max_width=900)
 
         if self.qr_surface:
-            qw, qh = self.qr_surface.get_size()
+            qr_surf = self.qr_surface
+            qw, qh = qr_surf.get_size()
+            max_qr = min(SCREEN_W - 160, SCREEN_H - 320, 420)
+            if self.compact_ui:
+                max_qr = min(SCREEN_W - 180, SCREEN_H - 280, 320)
+            if max_qr > 0 and (qw > max_qr or qh > max_qr):
+                scale = min(max_qr / qw, max_qr / qh)
+                qr_surf = pygame.transform.smoothscale(
+                    qr_surf,
+                    (max(1, int(qw * scale)), max(1, int(qh * scale))),
+                )
+                qw, qh = qr_surf.get_size()
             qx = SCREEN_W // 2 - qw // 2
-            qy = 100
+            qy = 110 if self.compact_ui else 100
             draw_rrect(self.screen, C_WHITE,
-                       (qx - 24, qy - 24, qw + 48, qh + 48), radius=24)
-            self.screen.blit(self.qr_surface, (qx, qy))
+                        (qx - 24, qy - 24, qw + 48, qh + 48), radius=24)
+            self.screen.blit(qr_surf, (qx, qy))
 
             # 안내문
             dy = qy + qh + 50
@@ -1681,13 +1861,12 @@ class PhotoBooth:
                       SCREEN_W // 2, dy, anchor="center", max_width=1500)
             dy += 36
             draw_text(self.screen,
-                      f"화면을 터치하면 바로 종료 · {remain}초 후 자동 복귀",
+                      f"화면을 터치하면 사진 확인으로 돌아갑니다 · {remain}초 후 자동 복귀",
                       self.f_small, C_GRAY,
                       SCREEN_W // 2, dy, anchor="center", max_width=1200)
 
         if elapsed >= QR_SHOW_TIMEOUT:
-            self._set_state(St.IDLE)
-            self._reset_session()
+            self._return_to_review_from_qr()
 
     # ═══════════════════════════════════════════════
     #  메인 루프

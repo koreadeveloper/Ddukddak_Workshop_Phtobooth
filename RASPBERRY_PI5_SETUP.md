@@ -169,7 +169,7 @@ PHOTOBOOTH_CAM_STALE_SECS=3
 PHOTOBOOTH_CAM_RECONNECT_SECS=2
 PHOTOBOOTH_CAM_MAX_READ_FAILURES=30
 PHOTOBOOTH_DEFAULT_PRINT_COPIES=1
-PHOTOBOOTH_MAX_PRINT_COPIES=3
+PHOTOBOOTH_MAX_PRINT_COPIES=10
 PHOTOBOOTH_REVIEW_TIMEOUT=120
 PHOTOBOOTH_PRINT_RESULT_TIMEOUT=5
 PHOTOBOOTH_PRINT_JOB_WAIT_SECS=120
@@ -188,7 +188,7 @@ PHOTOBOOTH_CLEANUP_INTERVAL_SECS=3600
 
 출력 레이아웃은 `2x2`로 고정입니다. 시작 화면과 리뷰 화면에서 `auto`나 `4단`을 선택할 수 없고, RP-108 4x6 파일 하나에는 네 컷만 들어갑니다.
 
-리뷰 화면에서는 인쇄 매수를 `1~PHOTOBOOTH_MAX_PRINT_COPIES` 범위에서 바꿀 수 있습니다. 손님이 리뷰 화면을 오래 방치하면 `PHOTOBOOTH_REVIEW_TIMEOUT`초 뒤 대기 화면으로 자동 복귀합니다. 시작 화면의 `운영 점검`에서는 카메라 프레임, CUPS 프린터 등록, QR 서버 주소, 저장공간을 확인할 수 있습니다.
+리뷰 화면에서는 인쇄 매수를 `1~PHOTOBOOTH_MAX_PRINT_COPIES` 범위에서 바꿀 수 있습니다. 기본 최대값은 10장입니다. 손님이 리뷰 화면을 오래 방치하면 `PHOTOBOOTH_REVIEW_TIMEOUT`초 뒤 대기 화면으로 자동 복귀합니다. 시작 화면의 `운영 점검`에서는 카메라 프레임, CUPS 프린터 등록, QR 서버 주소, 저장공간을 확인할 수 있습니다.
 
 QR 코드는 JPG 파일을 바로 여는 대신 모바일 저장 페이지를 엽니다. 스마트폰에서 미리보기를 확인하고 `사진 다운로드` 버튼을 누르면 최종 네컷 JPG가 저장됩니다. 일부 iPhone/Android 브라우저에서 다운로드 버튼이 바로 저장되지 않으면 사진을 길게 눌러 저장하세요.
 

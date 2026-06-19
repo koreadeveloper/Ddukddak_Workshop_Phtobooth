@@ -124,6 +124,13 @@ if [ -f .env ] && grep -qE "^[[:space:]]*(export[[:space:]]+)?PHOTOBOOTH_DEFAULT
     echo "  ✓ 기본 프레임을 블랙으로 업데이트했습니다 (백업: $backup)"
 fi
 
+if [ -f .env ] && grep -qE "^[[:space:]]*(export[[:space:]]+)?PHOTOBOOTH_MAX_PRINT_COPIES=3[[:space:]]*$" .env; then
+    backup=".env.print-copies-backup.$(date +%Y%m%d%H%M%S)"
+    cp .env "$backup"
+    sed -i -E 's/^([[:space:]]*(export[[:space:]]+)?PHOTOBOOTH_MAX_PRINT_COPIES)=3[[:space:]]*$/\1=10/' .env
+    echo "  ✓ 최대 인쇄 매수를 10장으로 업데이트했습니다 (백업: $backup)"
+fi
+
 # ── 실행 권한 ────────────────────────────────────
 chmod +x run.sh
 
