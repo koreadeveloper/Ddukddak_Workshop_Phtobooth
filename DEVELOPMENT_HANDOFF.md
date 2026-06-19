@@ -2,7 +2,7 @@
 
 작성일: 2026-05-29  
 대상 저장소: `koreadeveloper/Ddukddak_Workshop_Phtobooth`  
-현재 기준 커밋: `7ddfe53 Simplify FHD booth start screen`
+현재 기준: `main` 브랜치 최신 커밋. 라즈베리파이에서는 `git log -1 --oneline`으로 확인한다.
 
 ## 1. 프로젝트 목적
 
@@ -54,6 +54,14 @@ ElecSync S15A 1920x1080 모니터 기준으로 첫 화면을 단순화했다.
   - `config.py`
   - `.env.example`
 
+### 1024x768 터치 화면 대응
+
+라즈베리파이에서 실제 표시 해상도가 `1024 x 768`로 잡히면 기존 1920x1080 UI를 축소 표시하면서 글자가 흐려지고 리뷰 화면 버튼이 겹칠 수 있었다. 현재 코드는 `DISPLAY_AUTO_SIZE=1`일 때 실제 디스플레이 크기에 맞춰 내부 UI 해상도를 조정하고, 1280x800 이하 화면에서는 리뷰 화면을 별도 compact 레이아웃으로 그린다.
+
+- 1024x768에서는 내부 UI를 그대로 1024x768로 그려 축소 렌더링을 피한다.
+- 리뷰 화면은 출력 미리보기, 촬영 컷, 설정 버튼, 하단 실행 버튼이 겹치지 않도록 분리 배치한다.
+- 기본 프레임 테마는 `studio_black`이다.
+
 ### 리뷰 화면 기능
 
 처음 화면에서는 설정을 없앴지만, 촬영 후 리뷰 화면에서는 다음을 바꿀 수 있다.
@@ -95,13 +103,7 @@ cd ~/photobooth
 git log -1 --oneline
 ```
 
-정상 최신이면 아래처럼 떠야 한다.
-
-```bash
-7ddfe53 Simplify FHD booth start screen
-```
-
-`a272d2f`처럼 더 오래된 커밋이 뜨면 업데이트가 안 된 것이다.
+최신 GitHub 코드와 다르면 업데이트가 안 된 것이다. `a272d2f`처럼 더 오래된 커밋이 뜨면 `git fetch origin` 후 `git reset --hard origin/main`으로 맞춘다.
 
 ## 4. 라즈베리파이 업데이트 명령어
 
@@ -147,7 +149,7 @@ PHOTOBOOTH_PRINTER_NAME=CP1500
 PHOTOBOOTH_CAPTURE_ORIENTATION=landscape
 PHOTOBOOTH_PREVIEW_MIRROR=1
 PHOTOBOOTH_DEFAULT_FILTER=bright
-PHOTOBOOTH_DEFAULT_FRAME_THEME=soft_pink
+PHOTOBOOTH_DEFAULT_FRAME_THEME=studio_black
 PHOTOBOOTH_DEFAULT_PRINT_COPIES=1
 PHOTOBOOTH_MAX_PRINT_COPIES=3
 PHOTOBOOTH_REVIEW_TIMEOUT=120
@@ -315,4 +317,3 @@ PY
 - 인쇄 실패 시 사용자가 이해하기 쉬운 오류 메시지 강화
 - 운영자 전용 설정 화면 추가
 - 행사 종료 후 사진/통계 백업 기능 추가
-

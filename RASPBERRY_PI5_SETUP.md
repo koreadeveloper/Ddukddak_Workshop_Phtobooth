@@ -147,6 +147,8 @@ cd ~/photobooth
 
 세로 촬영이 기본입니다. 시작 화면은 `오늘의 네컷` / `뚝딱이 창의공작소 포토부스` 큰 제목, 실제 출력에 들어가는 중앙 크롭 미리보기, `촬영 시작` 버튼만 보여줍니다. 촬영 후 리뷰 화면에서 촬영 방향, 프레임, 필터를 다시 고르면 최종 출력 파일이 자동으로 다시 합성됩니다. 세로 사진이 거꾸로 저장되면 `.env`에서 아래 값을 바꾸거나 실행 옵션을 사용하세요.
 
+라즈베리파이가 모니터를 `1024 x 768`로 인식해도 `PHOTOBOOTH_DISPLAY_AUTO_SIZE=1`이면 프로그램이 실제 화면 크기에 맞춰 UI를 다시 그립니다. 글자와 버튼이 작거나 흐리면 `.env`에서 이 값이 `1`인지 먼저 확인하세요.
+
 ```bash
 PHOTOBOOTH_PORTRAIT_ROTATION=counterclockwise
 ```
@@ -161,7 +163,7 @@ PHOTOBOOTH_FOOTER_TEXT="뚝딱이 창의공작소 포토부스"
 PHOTOBOOTH_PRINT_BRAND_TEXT="뚝딱이 창의공작소"
 PHOTOBOOTH_PRINT_MARK_TEXT="FOUR CUT"
 PHOTOBOOTH_DOWNLOAD_PREFIX=photobooth
-PHOTOBOOTH_DEFAULT_FRAME_THEME=soft_pink  # soft_pink/classic_white/studio_black/sky_blue
+PHOTOBOOTH_DEFAULT_FRAME_THEME=studio_black  # soft_pink/classic_white/studio_black/sky_blue
 PHOTOBOOTH_DEFAULT_FILTER=bright          # original/bright/warm/cool/mono
 PHOTOBOOTH_CAM_STALE_SECS=3
 PHOTOBOOTH_CAM_RECONNECT_SECS=2

@@ -117,6 +117,13 @@ else
     fi
 fi
 
+if [ -f .env ] && grep -qE "^[[:space:]]*(export[[:space:]]+)?PHOTOBOOTH_DEFAULT_FRAME_THEME=soft_pink[[:space:]]*$" .env; then
+    backup=".env.frame-theme-backup.$(date +%Y%m%d%H%M%S)"
+    cp .env "$backup"
+    sed -i -E 's/^([[:space:]]*(export[[:space:]]+)?PHOTOBOOTH_DEFAULT_FRAME_THEME=)soft_pink[[:space:]]*$/\1studio_black/' .env
+    echo "  ✓ 기본 프레임을 블랙으로 업데이트했습니다 (백업: $backup)"
+fi
+
 # ── 실행 권한 ────────────────────────────────────
 chmod +x run.sh
 

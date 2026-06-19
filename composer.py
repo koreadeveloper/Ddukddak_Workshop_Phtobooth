@@ -57,7 +57,7 @@ PRINT_LAYOUTS = {
 
 
 def get_frame_theme(theme_id: str | None) -> dict:
-    return FRAME_THEMES.get(theme_id or "", FRAME_THEMES["soft_pink"])
+    return FRAME_THEMES.get(theme_id or "", FRAME_THEMES["studio_black"])
 
 
 def resolve_layout(layout_id: str | None, is_landscape: bool) -> str:

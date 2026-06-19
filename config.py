@@ -105,8 +105,8 @@ WINDOW_H   = _env_int("PHOTOBOOTH_WINDOW_H", 720)
 FPS        = _env_int("PHOTOBOOTH_FPS", 60)
 FULLSCREEN = _env_bool("PHOTOBOOTH_FULLSCREEN", True)
 
-# 실제 디스플레이 해상도는 Pi/모니터마다 다르므로, 기본 UI는 1920x1080으로
-# 그리고 출력 단계에서 화면에 맞게 스케일링합니다.
+# 실제 디스플레이 해상도는 Pi/모니터마다 다르므로, DISPLAY_AUTO_SIZE가 켜져 있으면
+# 프로그램 시작 시 실제 화면 크기에 맞춰 내부 UI 해상도를 조정합니다.
 DISPLAY_AUTO_SIZE = _env_bool("PHOTOBOOTH_DISPLAY_AUTO_SIZE", True)
 MOUSE_VISIBLE     = _env_bool("PHOTOBOOTH_MOUSE_VISIBLE", True)
 AUDIO_ENABLED     = _env_bool("PHOTOBOOTH_AUDIO_ENABLED", True)
@@ -126,7 +126,7 @@ PREVIEW_MIRROR = _env_bool("PHOTOBOOTH_PREVIEW_MIRROR", True)
 CAPTURE_ORIENTATION = _env_text("PHOTOBOOTH_CAPTURE_ORIENTATION", "portrait").lower()
 PORTRAIT_ROTATION = _env_text("PHOTOBOOTH_PORTRAIT_ROTATION", "clockwise").lower()
 DEFAULT_FILTER = _env_text("PHOTOBOOTH_DEFAULT_FILTER", "bright").lower()
-DEFAULT_FRAME_THEME = _env_text("PHOTOBOOTH_DEFAULT_FRAME_THEME", "soft_pink").lower()
+DEFAULT_FRAME_THEME = _env_text("PHOTOBOOTH_DEFAULT_FRAME_THEME", "studio_black").lower()
 
 # ─── 촬영 흐름 ───────────────────────────────────────
 PHOTO_COUNT      = 4     # 한 세션에 찍을 장수
