@@ -46,6 +46,7 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
+AI_HEALTH_INTERVAL_SECS = 60   # AI 서버 연결 확인 주기 (이미지 생성 없음, 비용 없음)
 INPUT_GUARD_SECS = 0.25   # 상태 전환 직후 입력 무시 시간 (터치 중복 클릭 방지)
 CONCEPT_CATEGORY_NAMES = {
     "profile": "프로필", "job": "직업", "traditional": "전통",
@@ -491,6 +492,11 @@ class PhotoBooth:
         self.idle_notice_until = 0.0
         self._concept_thumb_cache = {}
         self._ai_slot_cache = {}
+        self.ai_provider = None
+        self.ai_online = False              # health_check 결과 (첫 확인 전에는 회색)
+        self.ai_health_text = "확인 전"
+        self.ai_health_at = 0.0
+        self._ai_health_stop = threading.Event()
         if AI_ENABLED:
             self._init_ai()
         self.status_lines = []
@@ -726,14 +732,54 @@ class PhotoBooth:
                 log.warning("AI 비활성: 사용할 수 있는 콘셉트가 없습니다")
                 return
             self.ai_concepts = concepts
+            self.ai_provider = provider
             self.ai_manager = ai_transform.AITransformManager(provider)
             log.info(f"AI 변신 준비 완료: provider={provider.name}, 콘셉트 {len(concepts)}개")
+            threading.Thread(target=self._ai_health_loop, name="ai-health", daemon=True).start()
         except Exception as e:
             log.warning(f"AI 비활성: 초기화 실패 ({type(e).__name__}: {e})")
             self.ai_manager = None
 
     def _ai_available(self) -> bool:
-        return self.ai_manager is not None and bool(self.ai_concepts)
+        return self.ai_manager is not None and bool(self.ai_concepts) and self.ai_online
+
+    def _ai_health_loop(self):
+        """시작 시 + AI_HEALTH_INTERVAL_SECS마다 연결 확인 → ai_online 갱신 (백그라운드)."""
+        while not self._ai_health_stop.is_set():
+            try:
+                ok, text = self.ai_provider.health_check(timeout=5.0)
+            except Exception as e:
+                ok, text = False, f"확인 오류: {type(e).__name__}"
+            if ok != self.ai_online or not self.ai_health_at:
+                log.info(f"AI 서버 상태: {'정상' if ok else '연결 안 됨'} ({text})")
+            self.ai_online = bool(ok)
+            self.ai_health_text = text
+            self.ai_health_at = time.time()
+            self._ai_health_stop.wait(AI_HEALTH_INTERVAL_SECS)
+
+    def _ai_status_line(self):
+        if not AI_ENABLED:
+            return ("AI", "꺼짐 (PHOTOBOOTH_AI_ENABLED=0)", True)
+        if self.ai_provider is None:
+            return ("AI", "사용 불가 · 키/콘셉트/초기화 확인 필요 (로그 참고)", False)
+        name = getattr(self.ai_provider, "name", "?")
+        model = getattr(self.ai_provider, "model", "") or name
+        if name == "mock":
+            key_text = "키 불필요"
+        else:
+            key_text = "키 설정됨" if getattr(self.ai_provider, "has_key", False) else "키 없음"
+        if self.ai_health_at:
+            ago = int(time.time() - self.ai_health_at)
+            health = f"{'연결 정상' if self.ai_online else '연결 안 됨'} ({self.ai_health_text}, {ago}초 전)"
+        else:
+            health = "연결 확인 중"
+        today = booth_stats.summary()["today"]
+        return (
+            "AI",
+            f"{name} · {model} · {key_text} · {health} · "
+            f"오늘 성공 {today['ai_success']} / 실패 {today['ai_failure']}",
+            self.ai_online,
+        )
 
     def _ai_concept(self):
         for concept in self.ai_concepts:
@@ -1395,6 +1441,28 @@ class PhotoBooth:
                 continue
         return [path for _mtime, path in sorted(files)]
 
+    def _cleanup_ai_dirs(self, now: float) -> tuple[int, int]:
+        """photos/ai/{session_id}/ 폴더를 보관일 기준(폴더 mtime)으로 삭제."""
+        ai_dir = PHOTOS_DIR / "ai"
+        if PHOTO_RETENTION_DAYS <= 0 or not ai_dir.is_dir():
+            return 0, 0
+        cutoff = now - PHOTO_RETENTION_DAYS * 86400
+        deleted = errors = 0
+        try:
+            entries = list(ai_dir.iterdir())
+        except OSError as e:
+            log.warning(f"AI 폴더 정리 실패: {ai_dir} ({e})")
+            return 0, 1
+        for path in entries:
+            try:
+                if path.is_dir() and not path.is_symlink() and path.stat().st_mtime < cutoff:
+                    shutil.rmtree(path)
+                    deleted += 1
+            except Exception as e:
+                errors += 1
+                log.warning(f"AI 폴더 정리 실패: {path} ({e})")
+        return deleted, errors
+
     def _cleanup_old_photos(self, force: bool = False):
         now = time.time()
         if not force and now - self.cleanup_checked_at < CLEANUP_INTERVAL_SECS:
@@ -1466,11 +1534,16 @@ class PhotoBooth:
             free_gb = total_gb = 0.0
             log.warning(f"저장공간 확인 실패: {e}")
 
+        ai_deleted, ai_errors = self._cleanup_ai_dirs(now)
+        errors += ai_errors
+
         remaining = len(self._photo_files())
         self.cleanup_summary = (
             f"사진 {remaining}개 보관 · 정리 {deleted}개 · "
             f"여유 {free_gb:.1f}/{total_gb:.1f}GB"
         )
+        if ai_deleted:
+            self.cleanup_summary += f" · AI 폴더 {ai_deleted}개 정리"
         if errors:
             self.cleanup_summary += f" · 오류 {errors}개"
         if deleted or errors or force:
@@ -1542,6 +1615,8 @@ class PhotoBooth:
             f"(실패 {today['print_failure']}회) · QR {today['qr_downloads']}회 / "
             f"전체 촬영 {total_stats['sessions']}회"
         )
+        if AI_ENABLED:
+            stats_text += f" · AI {today['ai_success']}/{today['ai_requests']}"
         self.status_lines = [
             ("카메라", camera_text, camera_health["ok"]),
             ("프린터", printer_text or PRINTER_NAME, printer_ok),
@@ -1550,6 +1625,7 @@ class PhotoBooth:
             ("사진 폴더", f"{photos_count}개 JPG 저장됨", True),
             ("오늘 운영", stats_text, True),
             ("보관 정리", self.cleanup_summary, True),
+            self._ai_status_line(),
         ]
         self.status_checked_at = time.time()
 
@@ -2525,28 +2601,75 @@ class PhotoBooth:
     # ═══════════════════════════════════════════════
     #  PRINTING 렌더링
     # ═══════════════════════════════════════════════
+    def _wrap_detail(self, text: str, font, max_width: int, max_lines: int = 2) -> list[str]:
+        """' · ' 단위로 줄바꿈. 넘치면 마지막 줄은 fit_text로 줄임."""
+        parts = str(text).split(" · ")
+        lines, cur = [], ""
+        for part in parts:
+            cand = f"{cur} · {part}" if cur else part
+            if cur and font.size(cand)[0] > max_width:
+                lines.append(cur)
+                cur = part
+            else:
+                cur = cand
+        if cur:
+            lines.append(cur)
+        if len(lines) > max_lines:
+            lines = lines[:max_lines - 1] + [" · ".join(lines[max_lines - 1:])]
+        return lines
+
     def _draw_status(self):
         self.screen.fill(C_BG)
-        draw_text(self.screen, "운영 점검", self.f_big, C_PINK,
-                  SCREEN_W // 2, 90, anchor="center", max_width=900)
-        draw_text(self.screen, "카메라 · 프린터 · QR · 저장공간 상태",
-                  self.f_medium, C_GRAY, SCREEN_W // 2, 178, anchor="center",
-                  max_width=1000)
+        compact = self.compact_ui
+        if compact:
+            draw_text(self.screen, "운영 점검", self.f_big, C_PINK,
+                      SCREEN_W // 2, 34, anchor="center", max_width=SCREEN_W - 80)
+            draw_text(self.screen, "카메라 · 프린터 · QR · 저장공간 · AI 상태",
+                      self.f_tiny, C_GRAY, SCREEN_W // 2, 72, anchor="center",
+                      max_width=SCREEN_W - 80)
+        else:
+            draw_text(self.screen, "운영 점검", self.f_big, C_PINK,
+                      SCREEN_W // 2, 90, anchor="center", max_width=900)
+            draw_text(self.screen, "카메라 · 프린터 · QR · 저장공간 · AI 상태",
+                      self.f_medium, C_GRAY, SCREEN_W // 2, 170, anchor="center",
+                      max_width=1000)
 
         if not self.status_lines or time.time() - self.status_checked_at > 10:
             self._refresh_status()
 
-        y = 250
-        for title, detail, ok in self.status_lines:
+        rows = max(1, len(self.status_lines))
+        if compact:
+            x, w = 30, SCREEN_W - 60
+            top, bottom = 94, self.btn_status_close.rect.y - 10
+            badge_x, title_x, title_w = x + 52, x + 100, 140
+            detail_font, title_font, badge_font = self.f_tiny, self.f_small, self.f_small
+        else:
+            x, w = 300, 1320
+            top, bottom = 214, self.btn_status_close.rect.y - 24
+            badge_x, title_x, title_w = x + 70, x + 160, 200
+            detail_font, title_font, badge_font = self.f_small, self.f_medium, self.f_medium
+        pitch = (bottom - top) // rows
+        row_h = pitch - (6 if compact else 10)
+        detail_x = title_x + title_w + 16
+        detail_w = x + w - detail_x - 20
+        line_h = detail_font.get_height()
+        for i, (title, detail, ok) in enumerate(self.status_lines):
+            y = top + i * pitch
+            cy = y + row_h // 2
             color = C_GREEN if ok else C_PINK
-            draw_rrect(self.screen, C_WHITE, (360, y - 16, 1200, 78), radius=12)
-            draw_text(self.screen, "정상" if ok else "확인", self.f_medium, color,
-                      430, y + 22, anchor="center", max_width=115)
-            draw_text(self.screen, title, self.f_medium, C_DARK,
-                      540, y + 2, anchor="topleft", max_width=190)
-            draw_text(self.screen, detail, self.f_small, C_GRAY,
-                      760, y + 8, anchor="topleft", max_width=760)
-            y += 92
+            draw_rrect(self.screen, C_WHITE, (x, y, w, row_h), radius=12)
+            draw_text(self.screen, "정상" if ok else "확인", badge_font, color,
+                      badge_x, cy, anchor="center", max_width=90)
+            draw_text(self.screen, title, title_font, C_DARK,
+                      title_x, cy - title_font.get_height() // 2,
+                      anchor="topleft", max_width=title_w)
+            lines = self._wrap_detail(detail, detail_font, detail_w,
+                                      max_lines=max(1, row_h // line_h))
+            ly = cy - len(lines) * line_h // 2
+            for line in lines:
+                draw_text(self.screen, line, detail_font, C_GRAY,
+                          detail_x, ly, anchor="topleft", max_width=detail_w)
+                ly += line_h
 
         self.btn_status_close.draw(self.screen, self.f_medium)
 
@@ -2715,6 +2838,7 @@ class PhotoBooth:
             self.clock.tick(FPS)
 
         # ── 정리 ──────────────────────────────────────
+        self._ai_health_stop.set()
         if self.ai_manager is not None:
             self.ai_manager.shutdown()
         self.camera.stop()

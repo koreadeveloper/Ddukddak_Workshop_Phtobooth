@@ -24,6 +24,7 @@ Raspberry Pi 5, Logitech USB 웹캠, Canon SELPHY CP1500 조합으로 동작하�
 - RP-108 Postcard Size 100 x 148 mm 한 장에 4컷 합성 및 JPEG 저장
 - CUPS를 통한 CP1500 엽서 출력
 - QR 코드 모바일 페이지에서 미리보기 및 JPG 다운로드, QR 화면 이후 사진 확인 화면으로 복귀
+- (선택) AI 변신 네컷: 콘셉트 선택 → 동의 → 4컷 촬영 → 클라우드 AI(Gemini) 변환 → 합성/인쇄. 실패한 컷은 원본으로 대체
 
 ## 빠른 실행
 
@@ -35,6 +36,25 @@ chmod +x install.sh run.sh
 ```
 
 `.env.example`에는 기본 실행 설정이 들어 있습니다. `./install.sh`는 기존 `.env`를 덮어쓰지 않고 누락된 새 설정만 자동으로 추가합니다. 공백이 들어가는 문구 값은 따옴표로 감싸면 안전하고, 프로그램은 `.env`를 직접 읽으므로 `python3 doctor.py` 같은 점검 명령도 같은 설정을 사용합니다.
+
+## AI 변신 네컷 (선택)
+
+기본값은 꺼짐입니다. Gemini API 키(결제가 연결된 유료 티어 프로젝트)를 `.env`에 넣고 켭니다. 키는 화면·로그에 표시되지 않으며 `.env`는 커밋하지 마세요.
+
+```bash
+PHOTOBOOTH_AI_ENABLED=1
+PHOTOBOOTH_AI_PROVIDER=gemini
+PHOTOBOOTH_AI_API_KEY=발급받은키
+```
+
+```bash
+python3 doctor.py            # AI 설정/키 존재/콘셉트/서버 연결 확인 (비용 없음)
+python3 doctor.py --ai-live  # 실제 변환 1장 테스트 (비용 발생)
+./run.sh --test --window --ai-mock   # API 없이 AI 화면 흐름 테스트
+./run.sh --no-ai                     # AI를 끄고 일반 네컷만
+```
+
+자세한 절차는 [RASPBERRY_PI5_SETUP.md](RASPBERRY_PI5_SETUP.md)의 'AI 변신 네컷 설정', 기능 명세는 [docs/AI_TRANSFORM_PLAN.md](docs/AI_TRANSFORM_PLAN.md)를 보세요.
 
 라즈베리파이 설치, 프린터 등록, 자동 실행 설정은 [RASPBERRY_PI5_SETUP.md](RASPBERRY_PI5_SETUP.md)를 보세요.
 오늘 개발한 내용과 다음 개발자를 위한 코드 구조/운영 인수인계는 [DEVELOPMENT_HANDOFF.md](DEVELOPMENT_HANDOFF.md)를 보세요.
