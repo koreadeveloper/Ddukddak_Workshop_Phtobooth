@@ -49,6 +49,8 @@ FRAME_THEMES = {
     },
 }
 
+AI_DISCLOSURE_TEXT = "AI 생성 이미지"
+
 PRINT_LAYOUTS = {
     "auto": "자동",
     "grid": "2x2",
@@ -149,8 +151,14 @@ def _make_sheet(
     photos: list,
     frame_theme_id: str | None = None,
     layout_id: str | None = None,
+    label_text: str | None = None,
+    ai_disclosure: bool = False,
 ) -> Image.Image:
-    """4장 BGR ndarray → RP-108 한 장짜리 네컷 PIL Image"""
+    """4장 BGR ndarray → RP-108 한 장짜리 네컷 PIL Image
+
+    label_text: AI 콘셉트 라벨 (있으면 하단 문구를 '브랜드 · 라벨 · 날짜'로 바꿈)
+    ai_disclosure: True면 하단 구석에 'AI 생성 이미지' 작게 표기
+    """
     if len(photos) != 4:
         raise ValueError(f"compose requires exactly 4 photos, got {len(photos)}")
     theme = get_frame_theme(frame_theme_id)
@@ -175,7 +183,10 @@ def _make_sheet(
     # 하단 브랜드 텍스트
     font  = _pil_font(28)
     today = datetime.now().strftime("%Y.%m.%d")
-    label = f"{PRINT_BRAND_TEXT}  ·  {theme['name']}  ·  {PRINT_LAYOUTS[layout]}  ·  {today}"
+    if label_text:
+        label = f"{PRINT_BRAND_TEXT}  ·  {label_text}  ·  {today}"
+    else:
+        label = f"{PRINT_BRAND_TEXT}  ·  {theme['name']}  ·  {PRINT_LAYOUTS[layout]}  ·  {today}"
     bbox  = draw.textbbox((0, 0), label, font=font)
     tx = (PRINT_W - (bbox[2] - bbox[0])) // 2
     ty = PRINT_H - footer + 26
@@ -191,6 +202,17 @@ def _make_sheet(
         font=mark_font,
     )
 
+    if ai_disclosure:
+        note_font = _pil_font(18)
+        note = AI_DISCLOSURE_TEXT
+        note_bbox = draw.textbbox((0, 0), note, font=note_font)
+        draw.text(
+            (PRINT_W - (note_bbox[2] - note_bbox[0]) - 44, PRINT_H - 34),
+            note,
+            fill=theme["text"],
+            font=note_font,
+        )
+
     return canvas
 
 
@@ -200,9 +222,11 @@ def compose_print_image(
     session_id: str,
     frame_theme_id: str | None = None,
     layout_id: str | None = None,
+    label_text: str | None = None,
+    ai_disclosure: bool = False,
 ) -> Path:
     """RP-108 한 장에 네 컷만 배치해 JPEG 저장 후 경로 반환"""
-    sheet = _make_sheet(photos, frame_theme_id, layout_id)
+    sheet = _make_sheet(photos, frame_theme_id, layout_id, label_text, ai_disclosure)
     PHOTOS_DIR.mkdir(parents=True, exist_ok=True)
     out = PHOTOS_DIR / f"{session_id}.jpg"
     sheet.save(out, "JPEG", quality=95, dpi=(300, 300))
@@ -215,8 +239,10 @@ def make_preview_image(
     target_h: int = 820,
     frame_theme_id: str | None = None,
     layout_id: str | None = None,
+    label_text: str | None = None,
+    ai_disclosure: bool = False,
 ) -> Image.Image:
     """화면 표시용 미리보기 PIL Image (RP-108 시트, 세로 target_h 기준)"""
-    sheet = _make_sheet(photos, frame_theme_id, layout_id)
+    sheet = _make_sheet(photos, frame_theme_id, layout_id, label_text, ai_disclosure)
     target_w = int(sheet.width * target_h / sheet.height)
     return sheet.resize((target_w, target_h), Image.LANCZOS)
