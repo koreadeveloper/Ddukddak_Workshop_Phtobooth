@@ -90,13 +90,14 @@ CUPS를 켭니다.
 sudo systemctl enable --now cups
 ```
 
-CP1500을 USB로 연결하고 URI를 확인합니다.
+CP1500을 USB로 연결하고 URI와 등록 가능한 드라이버를 확인합니다.
 
 ```bash
 lpinfo -v
+lpinfo -m | grep -i cp1500
 ```
 
-`usb://Canon/...` 형태의 URI가 보이면 프린터를 등록합니다. 아래 URI는 예시이므로 실제 출력값으로 바꾸세요.
+기존 `CP1500` 대기열이 동작하면 그대로 사용합니다. 새로 등록할 때는 CP1500용으로 표시된 실제 URI와 드라이버 ID를 사용하세요. 목록에 없으면 [CP1500을 지원하는 Gutenprint 릴리스](https://sourceforge.net/p/gimp-print/mailman/gimp-print-announce/thread/Z9HwZen6WtZ6waXx%40shaftnet.org/)를 확인하세요.
 
 ```bash
 sudo lpadmin -p CP1500 \
@@ -206,9 +207,9 @@ QR 코드는 JPG 파일을 바로 여는 대신 모바일 저장 페이지를 �
 
 ## 6. AI 변신 네컷 설정 (선택)
 
-AI 변신 네컷은 촬영한 사진을 클라우드 AI(Google Gemini)로 보내 콘셉트(소방관, 한복 등)에 맞게 바꾼 뒤 인쇄합니다. 기본값은 꺼짐이고, 인터넷 연결이 필요합니다. 변환에 실패한 컷은 원본 사진으로 대체되므로 부스는 멈추지 않습니다.
+AI 변신 네컷은 촬영한 사진을 MonoRouter로 보내 Nano Banana 2.1로 편집한 뒤 인쇄합니다. 기본값은 꺼짐이고, 인터넷 연결이 필요합니다. 변환에 실패한 네컷은 원본 사진으로 대체합니다.
 
-1. API 키 발급: https://aistudio.google.com/apikey 에서 키를 만듭니다. 결제가 연결된 유료 티어 프로젝트를 쓰세요. 무료 티어는 입력 이미지가 학습에 쓰일 수 있어 행사 사진에 쓰면 안 됩니다.
+1. [MonoRouter Universal API 키](https://monogpt.kr/support/kr/articles/monorouter-api-key)를 발급합니다. 키에 이미지 편집 모델 사용 권한을 부여하세요.
 2. `.env` 설정 (`.env`는 커밋하지 마세요):
 
 ```bash
@@ -219,8 +220,8 @@ nano .env
 
 ```bash
 PHOTOBOOTH_AI_ENABLED=1
-PHOTOBOOTH_AI_PROVIDER=gemini
-PHOTOBOOTH_AI_API_KEY=발급받은키
+PHOTOBOOTH_AI_PROVIDER=monorouter
+PHOTOBOOTH_AI_MONOROUTER_API_KEY=발급받은키
 ```
 
 값 뒤에 `# 주석`을 붙이지 마세요. 나머지 `PHOTOBOOTH_AI_*` 값(시간 제한, 재변환 횟수, 동의 문구 등)은 `.env.example`의 기본값을 그대로 써도 됩니다.
@@ -229,7 +230,7 @@ PHOTOBOOTH_AI_API_KEY=발급받은키
 
 ```bash
 source venv/bin/activate
-python3 doctor.py            # AI 설정, 키 존재 여부(값은 표시 안 함), 콘셉트, DNS/HTTPS 연결 확인
+python3 doctor.py            # AI 설정, 콘셉트, MonoRouter 인증 확인
 python3 doctor.py --ai-live  # 실제 변환 1장 테스트 (비용 발생, 결과는 poc_out/doctor_ai_live.jpg)
 ```
 
@@ -241,23 +242,27 @@ python3 doctor.py --ai-live  # 실제 변환 1장 테스트 (비용 발생, 결�
 ./run.sh --no-ai                     # 오늘은 AI 없이 일반 네컷만
 ```
 
-AI가 켜져 있으면 시작 화면에 `일반 네컷` / `AI 변신 네컷` 버튼 2개가 나오고, 버튼을 정확히 눌러야 시작합니다. 프로그램은 60초마다 AI 서버 연결을 확인합니다(이미지 생성 없음, 비용 없음). 연결이 끊기면 `AI 변신 네컷` 버튼이 회색으로 바뀌고 일반 네컷만 쓸 수 있습니다. `운영 점검` 화면의 `AI` 행에서 Provider, 모델, 키 설정 여부, 마지막 연결 확인 결과, 오늘 AI 성공/실패 수를 볼 수 있습니다.
+AI가 켜져 있으면 시작 화면에서 일반 네컷, AI 변신 네컷, AI 증명사진을 선택할 수 있습니다. 프로그램은 60초마다 AI 서버 연결을 확인합니다(이미지 생성 없음, 비용 없음). 연결이 끊겼을 때는 일반 네컷으로 촬영할 수 있습니다. `운영 점검` 화면의 `AI` 행에서 Provider, 모델, 키 설정 여부, 마지막 연결 확인 결과, 오늘 AI 성공/실패 수를 볼 수 있습니다.
 
-비용과 시간: 1K 이미지 1장당 약 0.034달러, 4컷 한 세션 약 0.14달러입니다(2026-11 공식 가격 기준, 바뀔 수 있음). 컷마다 촬영 직후 변환을 시작하므로 마지막 컷 뒤 대기 시간은 보통 20~30초입니다.
+비용과 시간은 MonoRouter 사용 내역과 실제 변환에 걸린 시간으로 확인하세요. 인증 점검은 모델의 편집 권한과 크레딧 소진 여부까지 보장하지 않으므로 행사 전에 `doctor.py --ai-live`로 한 장을 확인합니다.
 
 개인정보: 손님은 `동의하고 촬영`을 눌러야 AI 촬영을 시작합니다. 어린이 대상 행사라면 보호자 동의 방식을 주최 측과 미리 정하세요. 원본/AI 개별 컷은 기본적으로 저장하지 않고(`PHOTOBOOTH_AI_SAVE_SOURCES=0`), 최종 합성본만 기존 보관 정책을 따릅니다. 인쇄물 하단에는 `AI 생성 이미지`가 표시됩니다.
 
+### 박람회용 AI 증명사진
+
+한 사람이 화면 중앙에서 카메라를 정면으로 보도록 안내합니다. 여러 명을 선택했을 때는 참가자마다 동의하고 한 사람씩 촬영합니다. 얼굴 검출이나 AI 변환이 실패한 경우 해당 참가자의 컷을 다시 촬영할 수 있습니다.
+
+프린터는 RP-108과 Postcard 용지를 사용합니다. AI 증명사진은 가로 34mm × 세로 49mm 규격으로 배치하고, CUPS에는 여백에 맞추는 확대·축소 없이 300dpi PDF로 보냅니다. 행사 전 실물에서 가로·세로 치수를 측정해 드라이버의 출력 배율을 확인하세요.
+
 ## 7. 기존 Pi에서 프로그램 업데이트
 
-이미 `~/photobooth`에 설치해 둔 상태에서 GitHub의 최신 수정본을 받으려면 다음 순서로 업데이트합니다.
+이미 `~/photobooth`에 설치해 둔 상태라면 실행 중인 포토부스를 닫고 업데이트합니다. `git status --short`에 파일 변경이 표시되면 내용을 먼저 확인하세요.
 
 ```bash
 cd ~/photobooth
 git status --short
-git stash push -m "backup pi local install changes" -- install.sh
-git pull origin main
-chmod +x install.sh run.sh
-./install.sh
+git pull --ff-only origin main
+bash install.sh
 git log --oneline -1
 ```
 

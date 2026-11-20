@@ -10,6 +10,7 @@ FAIL_RATE=1 원본 대체, 재시도/거절 규칙, 타임아웃과 콘셉트 �
 """
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import sys
@@ -17,6 +18,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
+from unittest.mock import Mock
 
 REPO_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_DIR))
@@ -185,9 +187,9 @@ def test_timeout(concept):
 
 
 def test_concepts_loader(tmp: Path):
-    real = ai_concepts.load_concepts()
-    check("실제 ai_concepts.json 8개 로드 (썸네일 없어도 OK)",
-          len(real) == 8 and all(c.thumbnail_path is None or c.thumbnail_path.is_file() for c in real),
+    real = ai_concepts.load_concepts(REPO_DIR / "assets/ai_concepts.json", base_dir=REPO_DIR)
+    check("기본 콘셉트 8개와 예시 이미지 모두 로드",
+          len(real) == 8 and all(c.thumbnail_path and c.thumbnail_path.is_file() for c in real),
           ", ".join(c.id for c in real))
 
     thumb = tmp / "ok.jpg"
@@ -237,6 +239,33 @@ def test_stats(tmp: Path):
         booth_stats.STATS_PATH = original
 
 
+def test_monorouter_provider():
+    photo = frames()[0]
+    encoded = base64.b64encode(ai_transform.encode_jpeg(photo)).decode("ascii")
+    provider = ai_transform.MonoRouterProvider("test-key")
+    provider._session = Mock()
+    response = provider._session.post.return_value
+    response.status_code = 200
+    response.json.return_value = {"candidates": [{"content": {"parts": [
+        {"inlineData": {"mimeType": "image/jpeg", "data": encoded}},
+    ]}}]}
+    result = provider.transform(photo, "Edit the outfit", 10)
+    args, kwargs = provider._session.post.call_args
+    check("MonoRouter로 Bearer 인증과 이미지 편집 요청 전송",
+          args[0] == "https://monogpt.kr/api/monorouter/v1/gemini/v1beta/models/gemini-nano-banana-2.1:generateContent"
+          and kwargs["headers"]["Authorization"] == "Bearer test-key"
+          and kwargs["json"]["contents"][0]["parts"][1]["inlineData"]["data"] == encoded
+          and kwargs["json"]["generationConfig"]["responseModalities"] == ["IMAGE"])
+    check("MonoRouter 이미지 응답 디코딩", result.ok and result.image_bgr.shape == photo.shape)
+    response.json.return_value = {"promptFeedback": {"blockReason": "SAFETY"}}
+    blocked = provider.transform(photo, "Edit the outfit", 10)
+    check("MonoRouter 안전 정책 거절 처리", blocked.refused and not blocked.retryable)
+    provider._session.get.return_value.status_code = 200
+    healthy, _ = provider.health_check()
+    check("MonoRouter 상태 확인은 이미지 호출 없이 크레딧 조회",
+          healthy and provider._session.get.call_args.args[0].endswith("/v1/credits"))
+
+
 def main() -> int:
     logging.basicConfig(level=logging.ERROR)
     concepts = ai_concepts.load_concepts()
@@ -247,6 +276,7 @@ def main() -> int:
     test_fail_rate_one(concept)
     test_retry_rules()
     test_timeout(concept)
+    test_monorouter_provider()
     with tempfile.TemporaryDirectory() as d:
         test_concepts_loader(Path(d))
         test_stats(Path(d))

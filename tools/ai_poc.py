@@ -43,7 +43,7 @@ def main() -> int:
     parser.add_argument("--concept", default="all", help="콘셉트 id 또는 all (쉼표로 여러 개 가능)")
     parser.add_argument("--repeat", type=int, default=1, help="콘셉트별 반복 횟수")
     parser.add_argument("--out", type=Path, default=REPO_DIR / "poc_out", help="결과 폴더")
-    parser.add_argument("--provider", default=cfg.AI_PROVIDER, help="gemini | mock (기본: .env)")
+    parser.add_argument("--provider", default=cfg.AI_PROVIDER, help="monorouter | gemini | mock (기본: .env)")
     parser.add_argument("--model", default="", help="모델 ID 덮어쓰기 (기본: .env 또는 provider 기본값)")
     parser.add_argument("--timeout", type=float, default=cfg.AI_REQUEST_TIMEOUT, help="요청당 타임아웃(초)")
     parser.add_argument("--concepts-file", type=Path, default=cfg.AI_CONCEPTS_FILE)
@@ -59,8 +59,8 @@ def main() -> int:
         return 2
     if args.model and hasattr(provider, "model"):
         provider.model = args.model
-    if provider.name == "gemini" and not getattr(provider, "has_key", False):
-        print("[오류] PHOTOBOOTH_AI_API_KEY가 비어 있습니다. .env에 키를 넣거나 --provider mock으로 실행하세요.")
+    if provider.name != "mock" and not provider.has_key:
+        print(f"[오류] {provider.key_env}가 비어 있습니다. .env에 키를 넣거나 --provider mock으로 실행하세요.")
         return 2
 
     concepts = ai_concepts.load_concepts(args.concepts_file)

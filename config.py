@@ -167,9 +167,10 @@ PHOTOS_DIR = BASE_DIR / "photos"
 ASSETS_DIR = BASE_DIR / "assets"
 
 # ─── AI 변신 ─────────────────────────────────────────
-# API 키는 반드시 .env의 PHOTOBOOTH_AI_API_KEY로만 넣습니다. 로그/화면에 출력 금지.
+# 공급자마다 별도 키를 사용합니다. 로그/화면에 출력 금지.
 AI_ENABLED = _env_bool("PHOTOBOOTH_AI_ENABLED", False)
-AI_PROVIDER = _env_text("PHOTOBOOTH_AI_PROVIDER", "gemini").lower()
+AI_PROVIDER = _env_text("PHOTOBOOTH_AI_PROVIDER", "monorouter").lower()
+AI_MONOROUTER_API_KEY = _env_text("PHOTOBOOTH_AI_MONOROUTER_API_KEY", "")
 AI_API_KEY = _env_text("PHOTOBOOTH_AI_API_KEY", "")
 AI_MODEL = _env_text("PHOTOBOOTH_AI_MODEL", "")  # 비우면 provider 기본값 사용
 AI_REQUEST_TIMEOUT = _env_int("PHOTOBOOTH_AI_REQUEST_TIMEOUT", 45)

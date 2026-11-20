@@ -27,7 +27,6 @@ sudo apt-get install -y \
     python3-pil \
     python3-qrcode \
     libopencv-dev \
-    libatlas-base-dev \
     libsdl2-dev \
     libsdl2-image-dev \
     libsdl2-mixer-dev \

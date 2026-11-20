@@ -209,7 +209,7 @@ def check_ai(live: bool = False) -> bool:
         if getattr(provider, "has_key", False):
             _ok("AI API 키 설정됨 (값은 표시하지 않음)")
         else:
-            _fail("PHOTOBOOTH_AI_API_KEY가 비어 있습니다")
+            _fail(f"{provider.key_env}가 비어 있습니다")
             passed = False
 
     concepts = ai_concepts.load_concepts()
@@ -222,16 +222,6 @@ def check_ai(live: bool = False) -> bool:
         _fail(f"사용할 수 있는 AI 콘셉트가 없습니다: {cfg.AI_CONCEPTS_FILE}")
         passed = False
 
-    if provider.name != "mock":
-        from urllib.parse import urlparse
-
-        host = urlparse(ai_transform.GEMINI_API_BASE).hostname
-        try:
-            socket.getaddrinfo(host, 443)
-            _ok(f"AI 서버 DNS 확인: {host}")
-        except OSError as e:
-            _fail(f"AI 서버 DNS 실패: {host} ({e}) - 인터넷 연결을 확인하세요")
-            return False
     ok, text = provider.health_check(timeout=10.0)
     if ok:
         _ok(f"AI 서버 HTTPS 연결 확인: {text}")

@@ -5,6 +5,7 @@ import subprocess
 import logging
 import time
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import config as cfg
 
@@ -139,7 +140,19 @@ def wait_for_print_job(job_id: str, timeout: int | None = None) -> bool:
     return True
 
 
-def print_photo(file_path: Path, copies: int = 1) -> bool:
+def _submit_actual_size(cmd: list[str], file_path: Path) -> subprocess.CompletedProcess:
+    from PIL import Image
+    from composer import PRINT_DPI
+
+    # PDF의 페이지 치수로 사진의 물리 크기를 CUPS에 명시합니다.
+    with TemporaryDirectory(prefix="photobooth-print-") as directory:
+        pdf_path = Path(directory) / file_path.with_suffix(".pdf").name
+        with Image.open(file_path) as sheet:
+            sheet.save(pdf_path, "PDF", resolution=PRINT_DPI, quality=95, subsampling=0)
+        return subprocess.run([*cmd, str(pdf_path)], capture_output=True, text=True, timeout=20)
+
+
+def print_photo(file_path: Path, copies: int = 1, *, actual_size: bool = False) -> bool:
     """CUPS lp 명령으로 엽서 크기 출력"""
     printer_name, status = resolve_printer_name()
     if not printer_name:
@@ -153,12 +166,16 @@ def print_photo(file_path: Path, copies: int = 1) -> bool:
         "-n", str(copies),
         "-o", "media=Postcard",
         "-o", "PageSize=Postcard",
-        "-o", "fit-to-page",
         "-o", "ColorModel=RGB",
-        str(file_path),
     ]
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
+        if actual_size:
+            cmd += ["-o", "print-scaling=none", "-o", "StpiShrinkOutput=Crop",
+                    "-o", "StpBorderless=False"]
+            result = _submit_actual_size(cmd, file_path)
+        else:
+            cmd += ["-o", "fit-to-page", str(file_path)]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
         if result.returncode == 0:
             output = (result.stdout or result.stderr or "").strip()
             job_id = _extract_job_id(output, printer_name)

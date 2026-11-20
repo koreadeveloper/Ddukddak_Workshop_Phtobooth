@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-"""4컷 출력 이미지 합성 모듈
+"""포토부스 출력 이미지 합성 모듈
 SELPHY CP1500 RP-108 엽서(100x148mm / 4x6 / 4R @ 300dpi) 기준:
-1181 x 1748 px 한 장에 네 컷만 배치합니다.
+1181 x 1748 px 한 장에 네컷 또는 34×49 mm 증명사진을 배치합니다.
 """
 from PIL import Image, ImageDraw, ImageFont
 from pathlib import Path
@@ -15,8 +15,12 @@ from config import PHOTOS_DIR, FONT_CANDIDATES, PRINT_BRAND_TEXT, PRINT_MARK_TEX
 log = logging.getLogger(__name__)
 
 # RP-108 Postcard Size: 100 x 148 mm @ 300dpi
+PRINT_DPI = 300
 PRINT_W = 1181
 PRINT_H = 1748
+ID_PHOTO_W = round(34 * PRINT_DPI / 25.4)
+ID_PHOTO_H = round(49 * PRINT_DPI / 25.4)
+ID_PHOTO_GAP = round(10 * PRINT_DPI / 25.4)
 
 FRAME_THEMES = {
     "soft_pink": {
@@ -216,6 +220,30 @@ def _make_sheet(
     return canvas
 
 
+def _make_id_sheet(photos: list[np.ndarray]) -> Image.Image:
+    if not 1 <= len(photos) <= 4:
+        raise ValueError("ID photo printing requires 1 to 4 photos")
+
+    sheet = Image.new("RGB", (PRINT_W, PRINT_H), "white")
+    draw = ImageDraw.Draw(sheet)
+    left = (PRINT_W - 2 * ID_PHOTO_W - ID_PHOTO_GAP) // 2
+    top = (PRINT_H - 2 * ID_PHOTO_H - ID_PHOTO_GAP) // 2
+    for index, photo in enumerate(photos):
+        row, col = divmod(index, 2)
+        x = left + col * (ID_PHOTO_W + ID_PHOTO_GAP)
+        y = top + row * (ID_PHOTO_H + ID_PHOTO_GAP)
+        sheet.paste(_center_crop(_bgr_to_pil(photo), ID_PHOTO_W, ID_PHOTO_H), (x, y))
+
+        # 재단선은 사진 영역 바깥에만 배치합니다.
+        for edge_x, dx in ((x, -1), (x + ID_PHOTO_W, 1)):
+            for edge_y, dy in ((y, -1), (y + ID_PHOTO_H, 1)):
+                draw.line((edge_x + dx * 6, edge_y, edge_x + dx * 20, edge_y),
+                          fill="#888888", width=2)
+                draw.line((edge_x, edge_y + dy * 6, edge_x, edge_y + dy * 20),
+                          fill="#888888", width=2)
+    return sheet
+
+
 # ─── 공개 API ─────────────────────────────────────────
 def compose_print_image(
     photos: list,
@@ -229,7 +257,7 @@ def compose_print_image(
     sheet = _make_sheet(photos, frame_theme_id, layout_id, label_text, ai_disclosure)
     PHOTOS_DIR.mkdir(parents=True, exist_ok=True)
     out = PHOTOS_DIR / f"{session_id}.jpg"
-    sheet.save(out, "JPEG", quality=95, dpi=(300, 300))
+    sheet.save(out, "JPEG", quality=95, dpi=(PRINT_DPI, PRINT_DPI))
     log.info(f"RP-108 네컷 저장: {out} ({PRINT_W}x{PRINT_H})")
     return out
 
@@ -244,5 +272,23 @@ def make_preview_image(
 ) -> Image.Image:
     """화면 표시용 미리보기 PIL Image (RP-108 시트, 세로 target_h 기준)"""
     sheet = _make_sheet(photos, frame_theme_id, layout_id, label_text, ai_disclosure)
+    target_w = int(sheet.width * target_h / sheet.height)
+    return sheet.resize((target_w, target_h), Image.LANCZOS)
+
+
+def compose_id_print_image(photos: list[np.ndarray], session_id: str) -> Path:
+    """34×49 mm 증명사진을 RP-108 엽서 한 장에 배치하고 JPEG로 저장합니다."""
+    sheet = _make_id_sheet(photos)
+    PHOTOS_DIR.mkdir(parents=True, exist_ok=True)
+    # 증명사진 인쇄물은 일반 네컷의 QR 공유 경로에서 제외합니다.
+    out = PHOTOS_DIR / f"{session_id}.id.jpg"
+    sheet.save(out, "JPEG", quality=95, subsampling=0, dpi=(PRINT_DPI, PRINT_DPI))
+    log.info(f"RP-108 증명사진 저장: {out} ({len(photos)}컷, {ID_PHOTO_W}x{ID_PHOTO_H} px/컷)")
+    return out
+
+
+def make_id_print_preview(photos: list[np.ndarray], target_h: int = 820) -> Image.Image:
+    """실제 출력 배치를 유지한 증명사진 엽서 미리보기."""
+    sheet = _make_id_sheet(photos)
     target_w = int(sheet.width * target_h / sheet.height)
     return sheet.resize((target_w, target_h), Image.LANCZOS)

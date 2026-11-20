@@ -17,6 +17,7 @@ import zlib
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Protocol
+from urllib.parse import quote
 
 import cv2
 import numpy as np
@@ -116,6 +117,7 @@ def postprocess_result(result_bgr: np.ndarray, target_aspect: float) -> np.ndarr
 
 # ─── Gemini (Interactions API REST, requests) ────────
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta"
+MONOROUTER_API_BASE = "https://monogpt.kr/api/monorouter/v1"
 GEMINI_API_REVISION = "2026-05-20"
 # 2026-11 공식 문서 기준 최신 Stable 이미지 편집 모델. 바뀌면 PHOTOBOOTH_AI_MODEL로 교체.
 GEMINI_DEFAULT_MODEL = "gemini-nano-banana-2.1"
@@ -163,6 +165,7 @@ class GeminiProvider:
     """Gemini Interactions API(POST /v1beta/interactions)로 이미지 편집 (SDK 없이 requests 사용)."""
 
     name = "gemini"
+    key_env = "PHOTOBOOTH_AI_API_KEY"
 
     def __init__(self, api_key: str, model: str = "", api_base: str = GEMINI_API_BASE):
         self._api_key = api_key or ""
@@ -171,7 +174,10 @@ class GeminiProvider:
         self._session = requests.Session()
 
     def __repr__(self):
-        return f"GeminiProvider(model={self.model!r})"   # 키는 표시하지 않음
+        return f"{type(self).__name__}(model={self.model!r})"
+
+    def _edit_url(self) -> str:
+        return f"{self._api_base}/interactions"
 
     @property
     def has_key(self) -> bool:
@@ -245,18 +251,18 @@ class GeminiProvider:
             return res
 
         if not self._api_key:
-            return _done(AIResult(False, error="API 키 없음 (PHOTOBOOTH_AI_API_KEY)"))
+            return _done(AIResult(False, error=f"API 키 없음 ({self.key_env})"))
         try:
             payload = self._payload(image_bgr, prompt)
         except Exception as e:
             return _done(AIResult(False, error=f"전처리 실패: {type(e).__name__}"))
 
         # 재시도는 transform_with_retry가 맡습니다 (여기서는 1회만 요청)
-        url = f"{self._api_base}/interactions"
         try:
             resp = self._session.post(
-                url, headers=self._headers(), json=payload,
+                self._edit_url(), headers=self._headers(), json=payload,
                 timeout=(min(10.0, timeout), timeout),
+                allow_redirects=False,
             )
         except requests.Timeout:
             return _done(AIResult(False, error="요청 시간 초과", retryable=True))
@@ -292,6 +298,81 @@ class GeminiProvider:
         if resp.status_code == 404:
             return False, f"모델 없음: {self.model}"
         return False, _api_error_message(resp)
+
+
+class MonoRouterProvider(GeminiProvider):
+    """MonoRouter 인증과 네이티브 generateContent 규격을 사용합니다."""
+
+    name = "monorouter"
+    key_env = "PHOTOBOOTH_AI_MONOROUTER_API_KEY"
+
+    def __init__(self, api_key: str, model: str = ""):
+        super().__init__(api_key, model, api_base=MONOROUTER_API_BASE)
+
+    def _headers(self) -> dict:
+        return {"Authorization": f"Bearer {self._api_key}"}
+
+    def _edit_url(self) -> str:
+        model = quote(self.model, safe="")
+        return f"{self._api_base}/gemini/v1beta/models/{model}:generateContent"
+
+    def _payload(self, image_bgr: np.ndarray, prompt: str) -> dict:
+        h, w = image_bgr.shape[:2]
+        return {
+            "contents": [{"role": "user", "parts": [
+                {"text": prompt},
+                {"inlineData": {
+                    "mimeType": "image/jpeg",
+                    "data": base64.b64encode(encode_jpeg(image_bgr)).decode("ascii"),
+                }},
+            ]}],
+            "generationConfig": {
+                "responseModalities": ["IMAGE"],
+                "imageConfig": {
+                    "aspectRatio": closest_aspect_ratio(w / h),
+                    "imageSize": GEMINI_IMAGE_SIZE,
+                },
+            },
+        }
+
+    def _parse_response(self, data: dict) -> AIResult:
+        if not isinstance(data, dict):
+            return AIResult(False, error="MonoRouter 응답 형식 오류")
+        reasons = [(data.get("promptFeedback") or {}).get("blockReason")]
+        for candidate in data.get("candidates") or []:
+            reasons.append(candidate.get("finishReason"))
+            for part in (candidate.get("content") or {}).get("parts") or []:
+                inline = part.get("inlineData") or part.get("inline_data") or {}
+                mime_type = inline.get("mimeType") or inline.get("mime_type") or ""
+                encoded = inline.get("data")
+                if part.get("thought") or not mime_type.startswith("image/") or not encoded:
+                    continue
+                try:
+                    image = decode_image(base64.b64decode(encoded, validate=True))
+                except (ValueError, TypeError, cv2.error):
+                    continue
+                if image is not None:
+                    return AIResult(True, image_bgr=image)
+        if _looks_refused(*reasons):
+            return AIResult(False, error="MonoRouter 이미지 편집 안전정책 거절", refused=True)
+        return AIResult(False, error="MonoRouter 응답에 편집 이미지 없음")
+
+    def health_check(self, timeout: float = 5.0) -> tuple[bool, str]:
+        """인증과 연결만 확인합니다. 모델의 이미지 편집 권한은 실제 요청에서 확인합니다."""
+        if not self.has_key:
+            return False, f"API 키 없음 ({self.key_env})"
+        try:
+            resp = self._session.get(
+                f"{self._api_base}/credits", headers=self._headers(),
+                timeout=timeout, allow_redirects=False,
+            )
+        except requests.RequestException as e:
+            return False, f"연결 실패: {type(e).__name__}"
+        if resp.status_code == 200:
+            return True, "MonoRouter 키 인증 정상"
+        if resp.status_code in (401, 403):
+            return False, "MonoRouter API 키 오류/권한 없음"
+        return False, f"MonoRouter 크레딧 조회 실패 (HTTP {resp.status_code})"
 
 
 # ─── Mock (API 없이 흐름 테스트) ─────────────────────
@@ -341,13 +422,15 @@ class MockProvider:
 
 
 def get_provider(name: str | None = None) -> AIProvider:
-    """cfg.AI_PROVIDER로 Provider 선택: gemini | mock. 알 수 없는 값이면 ValueError."""
+    """설정에서 이미지 편집 공급자를 선택합니다."""
     name = (name or cfg.AI_PROVIDER or "").strip().lower()
     if name == "mock":
         return MockProvider()
     if name == "gemini":
         return GeminiProvider(cfg.AI_API_KEY, cfg.AI_MODEL)
-    raise ValueError(f"알 수 없는 AI provider: {name!r} (gemini | mock)")
+    if name == "monorouter":
+        return MonoRouterProvider(cfg.AI_MONOROUTER_API_KEY, cfg.AI_MODEL)
+    raise ValueError(f"알 수 없는 AI provider: {name!r} (monorouter | gemini | mock)")
 
 
 # ─── 재시도 (모든 Provider 공통) ─────────────────────
