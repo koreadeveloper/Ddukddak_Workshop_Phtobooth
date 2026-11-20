@@ -81,7 +81,11 @@ def _parse_item(item, base_dir: Path) -> AIConcept | None:
         path = Path(thumbnail)
         if not path.is_absolute():
             path = base_dir / path
-        if path.is_file():
+        try:
+            is_file = path.is_file()
+        except OSError:
+            is_file = False
+        if is_file:
             thumbnail_path = path
         else:
             log.info(f"AI 콘셉트 {cid}: 썸네일 없음 ({thumbnail}) → 색상 카드로 대체")
