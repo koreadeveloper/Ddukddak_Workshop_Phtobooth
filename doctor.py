@@ -3,6 +3,7 @@
 """라즈베리파이 현장 실행 전 점검 도구."""
 from __future__ import annotations
 
+import argparse
 import importlib
 import os
 import shutil
@@ -161,7 +162,115 @@ def check_stats() -> bool:
     return True
 
 
+def _ai_live_test_image():
+    """samples/의 첫 JPG, 없으면 합성 테스트 이미지."""
+    import cv2
+    import numpy as np
+
+    samples = sorted((cfg.BASE_DIR / "samples").glob("*.jpg"))
+    for path in samples:
+        img = cv2.imread(str(path))
+        if img is not None:
+            return img, path.name
+    img = np.full((720, 1280, 3), (200, 210, 225), np.uint8)
+    cv2.circle(img, (640, 330), 150, (150, 180, 220), -1)
+    cv2.rectangle(img, (470, 470), (810, 720), (90, 90, 140), -1)
+    return img, "합성 테스트 이미지"
+
+
+def check_ai(live: bool = False) -> bool:
+    """AI 설정/키 존재/콘셉트/네트워크 점검. 키 값은 절대 출력하지 않음.
+
+    live=True일 때만 실제 이미지 1장을 변환합니다 (비용 발생).
+    """
+    if not cfg.AI_ENABLED and not live:
+        _ok("AI 변신 꺼짐 (PHOTOBOOTH_AI_ENABLED=0) - 점검 생략")
+        return True
+    if not cfg.AI_ENABLED:
+        _warn("PHOTOBOOTH_AI_ENABLED=0 상태지만 --ai-live 요청으로 점검합니다")
+
+    try:
+        import requests  # noqa: F401
+        import ai_concepts
+        import ai_transform
+    except Exception as e:
+        _fail(f"AI 모듈 불러오기 실패: {type(e).__name__}: {e}")
+        return False
+
+    passed = True
+    try:
+        provider = ai_transform.get_provider()
+    except Exception as e:
+        _fail(f"AI Provider 설정 오류: {e}")
+        return False
+    model = getattr(provider, "model", "") or provider.name
+    _ok(f"AI Provider: {provider.name} · 모델 {model}")
+    if provider.name != "mock":
+        if getattr(provider, "has_key", False):
+            _ok("AI API 키 설정됨 (값은 표시하지 않음)")
+        else:
+            _fail("PHOTOBOOTH_AI_API_KEY가 비어 있습니다")
+            passed = False
+
+    concepts = ai_concepts.load_concepts()
+    if concepts:
+        missing = [c.id for c in concepts if c.thumbnail_path is None]
+        _ok(f"AI 콘셉트 {len(concepts)}개 로드 ({cfg.AI_CONCEPTS_FILE})")
+        if missing:
+            _warn(f"콘셉트 썸네일 없음 {len(missing)}개 → 색상 카드로 표시: {', '.join(missing)}")
+    else:
+        _fail(f"사용할 수 있는 AI 콘셉트가 없습니다: {cfg.AI_CONCEPTS_FILE}")
+        passed = False
+
+    if provider.name != "mock":
+        from urllib.parse import urlparse
+
+        host = urlparse(ai_transform.GEMINI_API_BASE).hostname
+        try:
+            socket.getaddrinfo(host, 443)
+            _ok(f"AI 서버 DNS 확인: {host}")
+        except OSError as e:
+            _fail(f"AI 서버 DNS 실패: {host} ({e}) - 인터넷 연결을 확인하세요")
+            return False
+    ok, text = provider.health_check(timeout=10.0)
+    if ok:
+        _ok(f"AI 서버 HTTPS 연결 확인: {text}")
+    else:
+        _fail(f"AI 서버 연결 확인 실패: {text}")
+        passed = False
+
+    if not live:
+        return passed
+    if not passed or not concepts:
+        _warn("기본 점검이 실패해 실제 변환 테스트(--ai-live)는 생략합니다")
+        return False
+
+    import cv2
+
+    image, label = _ai_live_test_image()
+    concept = concepts[0]
+    upload = ai_transform.prepare_upload_image(image)
+    print(f"실제 변환 1장 테스트: {concept.name} · {label} (비용 발생)")
+    res = ai_transform.transform_with_retry(provider, upload, concept.prompt, cfg.AI_REQUEST_TIMEOUT)
+    if not res.ok:
+        kind = "안전정책 거절" if res.refused else "실패"
+        _fail(f"AI 실제 변환 {kind} ({res.elapsed:.1f}초): {res.error}")
+        return False
+    out_dir = cfg.BASE_DIR / "poc_out"
+    out_dir.mkdir(exist_ok=True)
+    out_path = out_dir / "doctor_ai_live.jpg"
+    result = ai_transform.postprocess_result(res.image_bgr, ai_transform.slot_aspect_for(image))
+    saved = cv2.imwrite(str(out_path), result)
+    _ok(f"AI 실제 변환 성공: {res.elapsed:.1f}초" + (f" → {out_path}" if saved else " (결과 저장 실패)"))
+    return True
+
+
 def main() -> int:
+    parser = argparse.ArgumentParser(description="포토부스 현장 점검")
+    parser.add_argument("--ai-live", action="store_true",
+                        help="AI 실제 변환 1장 테스트 (API 비용 발생)")
+    args = parser.parse_args()
+
     print(f"{cfg.BRAND_NAME} Pi 점검")
     print(f"Python: {sys.version.split()[0]}")
     checks = [
@@ -172,6 +281,7 @@ def main() -> int:
         check_qr_port(),
         check_storage(),
         check_stats(),
+        check_ai(live=args.ai_live),
     ]
     if all(checks):
         _ok("전체 점검 통과")

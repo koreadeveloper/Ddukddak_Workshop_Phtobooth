@@ -195,7 +195,7 @@ sed -i '/^PHOTOBOOTH_DEFAULT_PRINT_LAYOUT=/d;/^PHOTOBOOTH_SHOW_CROP_GUIDE=/d' .e
 - `_draw_countdown`: 촬영 카운트다운 화면
 - `_draw_review`: 촬영 후 리뷰 화면
 - `_capture_photo`: 실제 프레임 저장
-- `_start_print`: 최종 JPG 인쇄 요청
+- `_start_printing`: 최종 JPG 인쇄 요청 (백그라운드 스레드)
 - `_preview_crop_frame`: 화면 미리보기 중앙 크롭
 
 UI를 바꾸려면 먼저 이 파일을 봐야 한다.
@@ -220,8 +220,9 @@ CUPS 프린터와 연결되는 파일이다.
 
 중요한 부분:
 
-- `print_file`: `lp` 명령으로 최종 JPG 출력
-- `printer_status`: 프린터 등록/상태 확인
+- `print_photo`: `lp` 명령으로 최종 JPG 출력 (매수 지정, 작업 ID 추적)
+- `wait_for_print_job`: CUPS 대기열에서 인쇄 작업 완료 대기
+- `get_printer_status`: 프린터 등록/상태 확인 (운영 점검 화면, `doctor.py`에서 사용)
 
 CP1500 프린터 문제가 있으면 먼저 터미널에서 아래를 확인한다.
 
@@ -254,6 +255,18 @@ lp -d CP1500 photos/파일이름.jpg
 - `install.sh`는 기존 `.env`를 보존할 수 있으므로, 코드 업데이트 후에도 예전 `.env` 때문에 화면이나 방향 설정이 그대로일 수 있다.
 - UI가 이상하면 코드보다 먼저 `.env`를 확인한다.
 
+### AI 변신 네컷 (`ai_transform.py`, `ai_concepts.py`)
+
+기능 명세는 `docs/AI_TRANSFORM_PLAN.md`가 기준이다. 일반 네컷 흐름은 그대로이고, AI 코드는 `session_mode == "ai"`일 때만 동작한다.
+
+- 흐름: IDLE `[AI 변신 네컷]` → `CONCEPT_SELECT` → `CONSENT` → 촬영(컷마다 즉시 변환 요청) → `AI_PROCESSING` → REVIEW
+- `ai_transform.py`: `GeminiProvider`(REST, `requests`만 사용), `MockProvider`, 전/후처리, `AITransformManager`(스레드 풀 + `poll()`)
+- `ai_concepts.py`: `assets/ai_concepts.json` 로더. 잘못된 콘셉트만 제외, 썸네일이 없으면 색상 카드
+- `main.py`: `_ai_submit`, `_poll_ai_results`, `_update_ai_processing`, `_ai_health_loop`(60초마다 연결 확인 → `ai_online`)
+- 실패/거절/시간 초과 컷은 원본으로 대체한다. 부스는 멈추지 않는다.
+- API 키와 이미지 base64 본문은 로그·화면에 출력하지 않는다. 운영 점검 화면에도 `키 설정됨/없음`만 표시한다.
+- 설정은 `PHOTOBOOTH_AI_*` (`.env.example` 참고). `--ai-mock`은 API 없이 Mock으로, `--no-ai`는 AI를 끈다.
+
 ### `RASPBERRY_PI5_SETUP.md`
 
 라즈베리파이에 설치, 실행, 자동 실행, 프린터 확인 방법이 정리된 운영 문서다. 실제 현장 설치 담당자는 이 문서를 먼저 보면 된다.
@@ -263,7 +276,7 @@ lp -d CP1500 photos/파일이름.jpg
 코드를 수정한 뒤 로컬 또는 라즈베리파이에서 최소 아래 검사를 한다.
 
 ```bash
-python -m py_compile main.py composer.py effects.py camera.py qr_share.py printer.py config.py doctor.py booth_stats.py
+python -m py_compile main.py composer.py effects.py camera.py qr_share.py printer.py config.py doctor.py booth_stats.py ai_transform.py ai_concepts.py
 bash -n install.sh
 bash -n run.sh
 ```
@@ -288,6 +301,15 @@ finally:
 PY
 ```
 
+AI 백엔드 테스트 (API 키·네트워크 불필요):
+
+```bash
+python3 tools/ai_manager_test.py
+./run.sh --test --window --ai-mock
+PHOTOBOOTH_AI_MOCK_FAIL_RATE=0.5 ./run.sh --test --window --ai-mock   # 일부 컷 원본 대체
+PHOTOBOOTH_AI_MOCK_DELAY=120 ./run.sh --test --window --ai-mock      # 시간 초과 → 원본 대체
+```
+
 현장 테스트 순서:
 
 1. `git log -1 --oneline`으로 최신 커밋 확인
@@ -298,6 +320,8 @@ PY
 6. 리뷰 화면에서 프레임/필터/촬영 방향 변경 후 자동 재합성되는지 확인
 7. `인쇄하기` 버튼으로 CP1500 출력 확인
 8. QR 다운로드 확인
+9. (AI 사용 시) `python3 doctor.py --ai-live` 통과, 운영 점검 화면 AI 행이 `정상`인지 확인
+10. (AI 사용 시) AI 변신 네컷 1회 촬영 → 인쇄물 하단 `AI 생성 이미지` 표기 확인
 
 ## 8. 알려진 주의사항
 
