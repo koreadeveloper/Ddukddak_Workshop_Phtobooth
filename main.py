@@ -54,6 +54,7 @@ class St:
     IDLE      = "idle"
     COUNTDOWN = "countdown"
     FLASH     = "flash"
+    AI_PROCESSING = "ai_processing"
     REVIEW    = "review"
     PRINTING  = "printing"
     QR_SHOW   = "qr_show"
@@ -460,6 +461,14 @@ class PhotoBooth:
         self.selected_print_layout = "grid"
         self.print_copies = max(1, min(DEFAULT_PRINT_COPIES, MAX_PRINT_COPIES))
         self._compose_generation = 0
+        # ── AI 변신 (AI_ENABLED=0이면 manager 없음 → 일반 네컷만) ──
+        self.ai_manager = None
+        self.ai_concepts = []
+        self.ai_generation = 0
+        self.session_mode = "normal"
+        self._ai_saved_look = None
+        if AI_ENABLED:
+            self._init_ai()
         self.status_lines = []
         self.status_checked_at = 0.0
         self.selected_retake_index = 0
@@ -642,6 +651,162 @@ class PhotoBooth:
         self.review_notice = ""
         self.review_notice_until = 0.0
         self.session_counted = False
+        # ── AI 변신 세션 필드 ──
+        if self.session_mode == "ai" and self._ai_saved_look is not None:
+            # AI 콘셉트 기본 프레임/필터는 그 세션에서만 사용
+            self.selected_filter, self.selected_frame_theme = self._ai_saved_look
+        self._ai_saved_look = None
+        if self.ai_manager is not None:
+            self.ai_manager.cancel_all()
+        self.session_mode = "normal"            # "normal" | "ai"
+        self.ai_concept_id = None
+        self.ai_generation += 1                 # 세션 식별 (늦게 온 결과 무시용)
+        self.ai_results = [None] * PHOTO_COUNT  # 성공 시 AI BGR (크롭 완료본)
+        self.ai_status = ["idle"] * PHOTO_COUNT  # idle|pending|done|failed|refused|timeout
+        self.ai_use_original = [False] * PHOTO_COUNT
+        self.ai_regen_count = 0
+        self.ai_processing_started_at = 0.0
+        self._ai_recompose_needed = False
+
+    # ─────────────────────────────────────────────────
+    #  AI 변신 (session_mode == "ai"일 때만 사용)
+    # ─────────────────────────────────────────────────
+    def _init_ai(self):
+        """AI 사용 준비. 실패해도 경고만 남기고 일반 네컷으로 계속 동작."""
+        try:
+            import ai_concepts
+            import ai_transform
+            provider = ai_transform.get_provider()
+            if getattr(provider, "name", "") != "mock" and not getattr(provider, "has_key", True):
+                log.warning("AI 비활성: PHOTOBOOTH_AI_API_KEY가 비어 있습니다")
+                return
+            concepts = ai_concepts.load_concepts()
+            if not concepts:
+                log.warning("AI 비활성: 사용할 수 있는 콘셉트가 없습니다")
+                return
+            self.ai_concepts = concepts
+            self.ai_manager = ai_transform.AITransformManager(provider)
+            log.info(f"AI 변신 준비 완료: provider={provider.name}, 콘셉트 {len(concepts)}개")
+        except Exception as e:
+            log.warning(f"AI 비활성: 초기화 실패 ({type(e).__name__}: {e})")
+            self.ai_manager = None
+
+    def _ai_available(self) -> bool:
+        return self.ai_manager is not None and bool(self.ai_concepts)
+
+    def _ai_concept(self):
+        for concept in self.ai_concepts:
+            if concept.id == self.ai_concept_id:
+                return concept
+        return None
+
+    def _begin_ai_session(self, concept):
+        self._begin_countdown()
+        self.session_mode = "ai"
+        self.ai_concept_id = concept.id
+        self._ai_saved_look = (self.selected_filter, self.selected_frame_theme)
+        if concept.default_filter in FILTERS:
+            self.selected_filter = concept.default_filter
+        if concept.default_frame in composer.FRAME_THEMES:
+            self.selected_frame_theme = concept.default_frame
+        booth_stats.increment("ai_sessions")
+        booth_stats.increment_concept(concept.id)
+        log.info(f"AI 변신 세션 시작: {concept.name} ({concept.id})")
+
+    def _ai_submit(self, idx: int, raw: np.ndarray):
+        """촬영 직후 해당 컷만 바로 변환 요청 (파이프라이닝)."""
+        import ai_transform
+        concept = self._ai_concept()
+        self.ai_results[idx] = None
+        self.ai_use_original[idx] = False
+        if concept is None:
+            self.ai_status[idx] = "failed"
+            return
+        try:
+            upload = ai_transform.prepare_upload_image(raw)
+            self.ai_manager.submit(self.ai_generation, idx, upload, concept)
+        except Exception as e:
+            log.warning(f"AI 변환 요청 실패 ({idx + 1}번 컷): {type(e).__name__}")
+            self.ai_status[idx] = "failed"
+            booth_stats.increment("ai_failure")
+            return
+        self.ai_status[idx] = "pending"
+        booth_stats.increment("ai_requests")
+
+    def _poll_ai_results(self):
+        import ai_transform
+        for gen, idx, res in self.ai_manager.poll():
+            if gen != self.ai_generation or not 0 <= idx < PHOTO_COUNT:
+                continue  # 지난 세션 결과 버림
+            if self.ai_status[idx] != "pending":
+                continue  # 타임아웃 확정된 컷의 늦은 응답은 버림
+            image = None
+            if res.ok and res.image_bgr is not None and idx < len(self.captured_raw_bgr):
+                try:
+                    aspect = ai_transform.slot_aspect_for(self.captured_raw_bgr[idx])
+                    image = ai_transform.postprocess_result(res.image_bgr, aspect)
+                except Exception as e:
+                    log.warning(f"AI 결과 후처리 실패 ({idx + 1}번 컷): {type(e).__name__}")
+            if image is not None:
+                self.ai_results[idx] = image
+                self.ai_status[idx] = "done"
+                booth_stats.increment("ai_success")
+            else:
+                self.ai_status[idx] = "refused" if res.refused else "failed"
+                booth_stats.increment("ai_failure")
+                if res.refused:
+                    booth_stats.increment("ai_refused")
+            if self.state == St.REVIEW:
+                self._ai_recompose_needed = True
+        # REVIEW 상태에서 재변환 결과가 도착했다면 재합성
+        if self._ai_recompose_needed and self.state == St.REVIEW and not self._composing:
+            self._ai_recompose_needed = False
+            self._recompose_current_session()
+
+    def _enter_ai_processing(self):
+        self.ai_processing_started_at = time.time()
+        self._set_state(St.AI_PROCESSING)
+
+    def _update_ai_processing(self):
+        pending = [i for i, st in enumerate(self.ai_status) if st == "pending"]
+        if pending and time.time() - self.ai_processing_started_at > AI_TOTAL_TIMEOUT:
+            for i in pending:
+                self.ai_status[i] = "timeout"
+                booth_stats.increment("ai_failure")
+            log.warning(f"AI 전체 시간 초과: {[i + 1 for i in pending]}번 컷은 원본 사용")
+            pending = []
+        if pending:
+            return
+        failed = [i + 1 for i, st in enumerate(self.ai_status) if st != "done"]
+        if failed:
+            self._set_review_notice(f"{', '.join(map(str, failed))}번 컷은 원본으로 넣었어요.", 6.0)
+        self._refresh_processed_photos()
+        self._start_compose()
+        self._set_state(St.REVIEW)
+        if self.snd_done:
+            self.snd_done.play()
+
+    def _draw_ai_processing(self):
+        self.screen.fill(C_BG)
+        concept = self._ai_concept()
+        cx, cy = SCREEN_W // 2, SCREEN_H // 2
+        line = max(48, SCREEN_H // 14)
+        draw_text(self.screen, "AI가 변신 중이에요", self.f_big, C_DARK,
+                  cx, cy - line * 3, anchor="center", max_width=SCREEN_W - 80)
+        if concept is not None:
+            draw_text(self.screen, f"{concept.name} 변신", self.f_medium, C_PINK,
+                      cx, cy - line * 2, anchor="center", max_width=SCREEN_W - 80)
+        done = sum(1 for st in self.ai_status if st != "pending")
+        draw_text(self.screen, f"{done} / {PHOTO_COUNT} 완료", self.f_large, C_DARK,
+                  cx, cy - line // 2, anchor="center", max_width=SCREEN_W - 80)
+        labels = {"pending": "변환 중", "done": "AI 완료", "failed": "원본 사용",
+                  "refused": "원본 사용", "timeout": "원본 사용", "idle": "-"}
+        status = "   ".join(f"{i + 1}번 {labels.get(st, st)}" for i, st in enumerate(self.ai_status))
+        draw_text(self.screen, status, self.f_small, C_GRAY,
+                  cx, cy + line // 2, anchor="center", max_width=SCREEN_W - 80)
+        elapsed = int(time.time() - self.ai_processing_started_at)
+        draw_text(self.screen, f"{elapsed}초 경과 · 보통 20~30초 걸려요", self.f_small, C_GRAY,
+                  cx, cy + line * 3 // 2, anchor="center", max_width=SCREEN_W - 80)
 
     def _audit_button_layout(self):
         groups = {
@@ -953,10 +1118,21 @@ class PhotoBooth:
                 self._oriented_frame(source).copy()
                 for source in self.captured_source_bgr
             ]
-        self.captured_bgr = [
-            apply_filter(raw, self.selected_filter)
-            for raw in self.captured_raw_bgr
-        ]
+        if self.session_mode == "ai":
+            # AI 결과(실패 컷은 원본) 위에 필터를 후처리로 적용
+            bases = []
+            for i, raw in enumerate(self.captured_raw_bgr):
+                base = raw
+                if (i < len(self.ai_results) and self.ai_results[i] is not None
+                        and not self.ai_use_original[i]):
+                    base = self.ai_results[i]
+                bases.append(base)
+            self.captured_bgr = [apply_filter(base, self.selected_filter) for base in bases]
+        else:
+            self.captured_bgr = [
+                apply_filter(raw, self.selected_filter)
+                for raw in self.captured_raw_bgr
+            ]
         self.thumb_surfaces = []
         self.strip_surface = None
         self.strip_path = None
@@ -1024,10 +1200,13 @@ class PhotoBooth:
             self.retake_index = None
             log.info(f"{idx + 1}번 컷 재촬영 완료")
         else:
+            idx = len(self.captured_raw_bgr)
             self.captured_source_bgr.append(source)
             self.captured_raw_bgr.append(raw)
             self.captured_bgr.append(processed)
             log.info(f"촬영 {len(self.captured_bgr)}/{PHOTO_COUNT}")
+        if self.session_mode == "ai" and self.ai_manager is not None and idx < PHOTO_COUNT:
+            self._ai_submit(idx, raw)
         return True
 
     def _start_compose(self):
@@ -1046,6 +1225,15 @@ class PhotoBooth:
         session_id = self.session_id
         frame_theme = self.selected_frame_theme
         print_layout = self.selected_print_layout
+        label_text = None
+        ai_disclosure = False
+        if self.session_mode == "ai":
+            used_ai = any(r is not None and not self.ai_use_original[i]
+                          for i, r in enumerate(self.ai_results))
+            concept = self._ai_concept()
+            if used_ai and concept is not None:
+                label_text = concept.print_label
+                ai_disclosure = AI_PRINT_DISCLOSURE
 
         def _work():
             try:
@@ -1058,11 +1246,14 @@ class PhotoBooth:
                     self.thumb_surfaces = surfs
 
                 # 풀 스트립 저장
-                strip_path = composer.compose_print_image(photos, session_id, frame_theme, print_layout)
+                strip_path = composer.compose_print_image(
+                    photos, session_id, frame_theme, print_layout, label_text, ai_disclosure
+                )
 
                 # 미리보기 Surface
                 preview = composer.make_preview_image(
-                    photos, self._print_preview_target_h(), frame_theme, print_layout
+                    photos, self._print_preview_target_h(), frame_theme, print_layout,
+                    label_text, ai_disclosure,
                 )
                 strip_surface = pil_to_surface(preview)
                 if generation == self._compose_generation:
@@ -1174,6 +1365,9 @@ class PhotoBooth:
                     if event.key == pygame.K_s:
                         self._refresh_status()
                         self._set_state(St.STATUS)
+                    elif event.key == pygame.K_a and self._ai_available():
+                        # 임시 (Phase 2): A 키 = 첫 번째 콘셉트로 AI 모드 시작
+                        self._begin_ai_session(self.ai_concepts[0])
                     else:
                         self._begin_countdown()
                 elif self.state == St.QR_SHOW:
@@ -1245,6 +1439,9 @@ class PhotoBooth:
                     return
             for orientation, btn in self.review_orientation_buttons:
                 if btn.hit(pos):
+                    if self.session_mode == "ai":
+                        self._set_review_notice("AI 변신 모드에서는 촬영 방향을 바꿀 수 없어요.")
+                        return
                     if self._composing:
                         self._set_review_notice("사진 합성 중입니다. 잠시 후 다시 눌러 주세요.")
                         return
@@ -1475,7 +1672,9 @@ class PhotoBooth:
         # 플래시 시간 경과 후 다음 단계
         elapsed = time.time() - self.state_time
         if elapsed >= SHOT_DELAY and self.flash_alpha <= 0:
-            if n >= PHOTO_COUNT:
+            if n >= PHOTO_COUNT and self.session_mode == "ai":
+                self._enter_ai_processing()
+            elif n >= PHOTO_COUNT:
                 self._start_compose()
                 self._set_state(St.REVIEW)
                 if self.snd_done:
@@ -1883,6 +2082,8 @@ class PhotoBooth:
 
             running = self._handle_events()
             self._cleanup_old_photos()
+            if self.ai_manager is not None:
+                self._poll_ai_results()
 
             # ── 상태별 업데이트 & 렌더링 ───────────────
             if self.state == St.IDLE:
@@ -1895,6 +2096,11 @@ class PhotoBooth:
 
             elif self.state == St.FLASH:
                 self._draw_flash()
+
+            elif self.state == St.AI_PROCESSING:
+                self._update_ai_processing()
+                if self.state == St.AI_PROCESSING:
+                    self._draw_ai_processing()
 
             elif self.state == St.REVIEW:
                 self._draw_review()
@@ -1912,6 +2118,8 @@ class PhotoBooth:
             self.clock.tick(FPS)
 
         # ── 정리 ──────────────────────────────────────
+        if self.ai_manager is not None:
+            self.ai_manager.shutdown()
         self.camera.stop()
         self.qr_server.stop()
         pygame.quit()
@@ -1949,6 +2157,11 @@ def main():
                         help="QR 다운로드 서버 포트")
     parser.add_argument("--no-audio", action="store_true",
                         help="효과음 없이 실행")
+    ai_group = parser.add_mutually_exclusive_group()
+    ai_group.add_argument("--ai-mock", action="store_true",
+                          help="AI 변신을 Mock Provider로 켜기 (API 호출 없음)")
+    ai_group.add_argument("--no-ai", action="store_true",
+                          help="AI 변신 끄기 (일반 네컷만)")
     cursor = parser.add_mutually_exclusive_group()
     cursor.add_argument("--show-cursor", action="store_true",
                         help="마우스 커서 표시")
@@ -1974,6 +2187,11 @@ def main():
         _set_runtime_value("QR_SERVER_PORT", args.qr_port)
     if args.no_audio:
         _set_runtime_value("AUDIO_ENABLED", False)
+    if args.ai_mock:
+        _set_runtime_value("AI_ENABLED", True)
+        _set_runtime_value("AI_PROVIDER", "mock")
+    if args.no_ai:
+        _set_runtime_value("AI_ENABLED", False)
     if args.show_cursor:
         _set_runtime_value("MOUSE_VISIBLE", True)
     if args.hide_cursor:
