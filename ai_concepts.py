@@ -126,7 +126,7 @@ def load_concepts(path: Path | str | None = None, base_dir: Path | None = None) 
     concepts: list[AIConcept] = []
     seen: set[str] = set()
     for item in items:
-        if isinstance(item, dict) and item.get("enabled", True) is False:
+        if isinstance(item, dict) and not item.get("enabled", True):
             continue
         concept = _parse_item(item, base_dir)
         if concept is None:
