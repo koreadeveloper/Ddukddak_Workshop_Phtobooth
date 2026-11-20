@@ -9,9 +9,12 @@ from __future__ import annotations
 import base64
 import logging
 import math
+import queue
 import random
+import threading
 import time
 import zlib
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -33,6 +36,7 @@ class AIResult:
     error: str = ""                       # 실패 사유 (로그/운영용, 사용자에게는 일반 문구)
     elapsed: float = 0.0
     refused: bool = False                 # 안전정책 거절 여부
+    retryable: bool = False               # 네트워크/429/5xx/시간초과처럼 다시 시도할 만한 실패
 
 
 class AIProvider(Protocol):
@@ -247,42 +251,28 @@ class GeminiProvider:
         except Exception as e:
             return _done(AIResult(False, error=f"전처리 실패: {type(e).__name__}"))
 
+        # 재시도는 transform_with_retry가 맡습니다 (여기서는 1회만 요청)
         url = f"{self._api_base}/interactions"
-        error = "알 수 없는 오류"
-        for attempt in range(2):   # 네트워크/429/5xx는 1회 재시도
-            remaining = timeout - (time.monotonic() - started)
-            if remaining < 1:
-                error = "요청 시간 초과"
-                break
-            retryable = False
+        try:
+            resp = self._session.post(
+                url, headers=self._headers(), json=payload,
+                timeout=(min(10.0, timeout), timeout),
+            )
+        except requests.Timeout:
+            return _done(AIResult(False, error="요청 시간 초과", retryable=True))
+        except requests.RequestException as e:
+            return _done(AIResult(False, error=f"네트워크 오류: {type(e).__name__}", retryable=True))
+        if resp.status_code == 200:
             try:
-                resp = self._session.post(
-                    url, headers=self._headers(), json=payload,
-                    timeout=(min(10.0, remaining), remaining),
-                )
-            except requests.Timeout:
-                error, retryable = "요청 시간 초과", True
-            except requests.RequestException as e:
-                error, retryable = f"네트워크 오류: {type(e).__name__}", True
-            else:
-                if resp.status_code == 200:
-                    try:
-                        data = resp.json()
-                    except ValueError:
-                        return _done(AIResult(False, error="응답 JSON 파싱 실패"))
-                    return _done(self._parse_response(data))
-                error = _api_error_message(resp)
-                if resp.status_code == 400 and _looks_refused(error):
-                    return _done(AIResult(False, error=f"안전정책 거절: {error}", refused=True))
-                retryable = resp.status_code == 429 or resp.status_code >= 500
-            if not retryable or attempt == 1:
-                break
-            wait = RETRY_BACKOFF_SECS * (attempt + 1)
-            if timeout - (time.monotonic() - started) <= wait + 1:
-                break
-            log.warning(f"AI 요청 재시도 ({error})")
-            time.sleep(wait)
-        return _done(AIResult(False, error=error))
+                data = resp.json()
+            except ValueError:
+                return _done(AIResult(False, error="응답 JSON 파싱 실패"))
+            return _done(self._parse_response(data))
+        error = _api_error_message(resp)
+        if resp.status_code == 400 and _looks_refused(error):
+            return _done(AIResult(False, error=f"안전정책 거절: {error}", refused=True))
+        retryable = resp.status_code == 429 or resp.status_code >= 500
+        return _done(AIResult(False, error=error, retryable=retryable))
 
     def health_check(self, timeout: float = 5.0) -> tuple[bool, str]:
         """모델 정보 조회만 합니다 (이미지 생성 호출 없음, 비용 없음)."""
@@ -322,9 +312,9 @@ class MockProvider:
         time.sleep(wait)
         elapsed = time.monotonic() - started
         if self.delay > timeout:
-            return AIResult(False, error="요청 시간 초과 (mock)", elapsed=elapsed)
+            return AIResult(False, error="요청 시간 초과 (mock)", elapsed=elapsed, retryable=True)
         if random.random() < self.fail_rate:
-            return AIResult(False, error="모의 실패 (mock)", elapsed=elapsed)
+            return AIResult(False, error="모의 실패 (mock)", elapsed=elapsed, retryable=True)
         try:
             out = self._tint(image_bgr, prompt)
         except Exception as e:
@@ -358,3 +348,139 @@ def get_provider(name: str | None = None) -> AIProvider:
     if name == "gemini":
         return GeminiProvider(cfg.AI_API_KEY, cfg.AI_MODEL)
     raise ValueError(f"알 수 없는 AI provider: {name!r} (gemini | mock)")
+
+
+# ─── 재시도 (모든 Provider 공통) ─────────────────────
+def transform_with_retry(provider: AIProvider, image_bgr: np.ndarray, prompt: str,
+                         timeout: float, backoff: float = RETRY_BACKOFF_SECS) -> AIResult:
+    """retryable 실패면 1회만 재시도. 안전정책 거절은 재시도하지 않음. 예외를 던지지 않음.
+
+    timeout은 재시도를 포함한 이 컷의 전체 시간 예산입니다.
+    """
+    started = time.monotonic()
+    res = AIResult(False, error="실행 오류")
+    for attempt in range(2):
+        remaining = timeout - (time.monotonic() - started)
+        if attempt and remaining < 1:
+            break
+        try:
+            res = provider.transform(image_bgr, prompt, max(0.0, remaining))
+        except Exception as e:   # Provider는 예외를 던지지 않아야 하지만 방어
+            res = AIResult(False, error=f"예외: {type(e).__name__}")
+        if res is None:
+            res = AIResult(False, error="Provider 결과 없음")
+        if res.ok or res.refused or not res.retryable or attempt == 1:
+            break
+        wait = backoff * random.uniform(0.7, 1.3)
+        if timeout - (time.monotonic() - started) <= wait + 1:
+            break
+        log.warning(f"AI 요청 재시도 ({res.error})")
+        time.sleep(wait)
+    res.elapsed = time.monotonic() - started
+    return res
+
+
+def _concept_prompt(concept) -> str:
+    if isinstance(concept, str):
+        return concept
+    if isinstance(concept, dict):
+        return str(concept.get("prompt", ""))
+    return str(getattr(concept, "prompt", ""))
+
+
+# ─── 세션 단위 비동기 변환 관리자 ────────────────────
+class AITransformManager:
+    """세션 단위 비동기 변환 관리자. main.py는 이것만 사용.
+
+    결과는 (generation, index, AIResult)로 큐에 쌓이고 메인 루프가 poll()로 꺼냅니다.
+    같은 (generation, index)를 다시 submit하면 이전 요청 결과는 버립니다 (재촬영/재변환).
+    cancel_all() 이후 도착한 결과도 버립니다. 진행 중 HTTP 요청은 끝까지 돌 수 있습니다.
+    """
+
+    def __init__(self, provider: AIProvider, max_workers: int | None = None,
+                 request_timeout: float | None = None):
+        self.provider = provider
+        workers = max(1, int(max_workers or cfg.AI_MAX_CONCURRENCY))
+        self.request_timeout = float(request_timeout or cfg.AI_REQUEST_TIMEOUT)
+        self._executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="ai")
+        self._queue: queue.Queue = queue.Queue()
+        self._lock = threading.Lock()
+        self._token = 0
+        self._latest: dict[tuple[int, int], int] = {}     # (gen, idx) → 최신 요청 토큰
+        self._running: dict[tuple[int, int], Future] = {}  # 아직 끝나지 않은 최신 요청
+        self._closed = False
+
+    def submit(self, generation: int, index: int, image_bgr: np.ndarray, concept) -> None:
+        key = (int(generation), int(index))
+        prompt = _concept_prompt(concept)
+        image = np.ascontiguousarray(image_bgr).copy()   # 메인 스레드가 원본을 바꿔도 안전
+        with self._lock:
+            if self._closed:
+                self._queue.put((key[0], key[1], -1, AIResult(False, error="관리자 종료됨")))
+                return
+            self._token += 1
+            token = self._token
+            old = self._running.pop(key, None)
+            if old is not None:
+                old.cancel()
+            self._latest[key] = token
+            future = self._executor.submit(self._run, key, token, image, prompt)
+            self._running[key] = future
+        log.info(f"AI 변환 요청: 세대 {key[0]} 컷 {key[1] + 1}")
+
+    def _run(self, key: tuple[int, int], token: int, image: np.ndarray, prompt: str):
+        try:
+            res = transform_with_retry(self.provider, image, prompt, self.request_timeout)
+        except Exception as e:
+            res = AIResult(False, error=f"예외: {type(e).__name__}")
+        with self._lock:
+            if self._latest.get(key) != token:
+                return   # 취소되었거나 더 새 요청이 있음
+            self._running.pop(key, None)
+            self._queue.put((key[0], key[1], token, res))
+        if res.ok:
+            log.info(f"AI 변환 완료: 세대 {key[0]} 컷 {key[1] + 1} ({res.elapsed:.1f}s)")
+        else:
+            kind = "거절" if res.refused else "실패"
+            log.warning(f"AI 변환 {kind}: 세대 {key[0]} 컷 {key[1] + 1} ({res.elapsed:.1f}s) {res.error}")
+
+    def poll(self) -> list[tuple[int, int, AIResult]]:
+        """완료된 결과를 꺼냅니다. 메인 스레드에서 매 프레임 호출해도 가볍습니다."""
+        out = []
+        while True:
+            try:
+                gen, idx, token, res = self._queue.get_nowait()
+            except queue.Empty:
+                break
+            with self._lock:
+                if token != -1:
+                    if self._latest.get((gen, idx)) != token:
+                        continue
+                    del self._latest[(gen, idx)]
+            out.append((gen, idx, res))
+        return out
+
+    def pending_count(self, generation: int) -> int:
+        """해당 세대에서 아직 결과가 나오지 않은 요청 수."""
+        with self._lock:
+            return sum(1 for (gen, _idx) in self._running if gen == generation)
+
+    def cancel_all(self) -> None:
+        """세션 리셋 시 호출. 시작 전 요청은 취소, 진행 중 요청의 결과는 버립니다."""
+        with self._lock:
+            for future in self._running.values():
+                future.cancel()
+            self._running.clear()
+            self._latest.clear()
+            while True:
+                try:
+                    self._queue.get_nowait()
+                except queue.Empty:
+                    break
+
+    def shutdown(self) -> None:
+        """프로그램 종료 시 호출. 진행 중 요청을 기다리지 않습니다."""
+        self.cancel_all()
+        with self._lock:
+            self._closed = True
+        self._executor.shutdown(wait=False, cancel_futures=True)

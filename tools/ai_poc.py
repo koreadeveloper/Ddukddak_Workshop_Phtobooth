@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import argparse
 import csv
-import json
 import logging
 import statistics
 import sys
@@ -25,27 +24,10 @@ sys.path.insert(0, str(REPO_DIR))
 import cv2  # noqa: E402
 
 import config as cfg  # noqa: E402
+import ai_concepts  # noqa: E402
 import ai_transform  # noqa: E402
 
 REPORT_FIELDS = ["concept", "input", "ok", "refused", "elapsed", "out_w", "out_h", "error"]
-REQUIRED_KEYS = ("id", "name", "prompt")
-
-
-def load_concepts(path: Path) -> list[dict]:
-    data = json.loads(path.read_text(encoding="utf-8"))
-    items = data.get("concepts", []) if isinstance(data, dict) else data
-    concepts = []
-    for item in items:
-        if not isinstance(item, dict) or not item.get("enabled", True):
-            continue
-        missing = [k for k in REQUIRED_KEYS if not item.get(k)]
-        if missing:
-            print(f"[경고] 콘셉트 제외 (필수 키 누락 {missing}): {item.get('id', '?')}")
-            continue
-        concepts.append(item)
-    return concepts
-
-
 def percentile(values: list[float], pct: float) -> float:
     if not values:
         return 0.0
@@ -81,15 +63,15 @@ def main() -> int:
         print("[오류] PHOTOBOOTH_AI_API_KEY가 비어 있습니다. .env에 키를 넣거나 --provider mock으로 실행하세요.")
         return 2
 
-    concepts = load_concepts(args.concepts_file)
+    concepts = ai_concepts.load_concepts(args.concepts_file)
     if args.concept != "all":
         wanted = [c.strip() for c in args.concept.split(",") if c.strip()]
-        unknown = set(wanted) - {c["id"] for c in concepts}
+        unknown = set(wanted) - {c.id for c in concepts}
         if unknown:
             print(f"[오류] 알 수 없는 콘셉트: {', '.join(sorted(unknown))}")
-            print("       사용 가능: " + ", ".join(c["id"] for c in concepts))
+            print("       사용 가능: " + ", ".join(c.id for c in concepts))
             return 2
-        concepts = [c for c in concepts if c["id"] in wanted]
+        concepts = [c for c in concepts if c.id in wanted]
     if not concepts:
         print("[오류] 실행할 콘셉트가 없습니다.")
         return 2
@@ -120,7 +102,7 @@ def main() -> int:
             raw = cv2.imread(str(input_path), cv2.IMREAD_COLOR)
             if raw is None:
                 for concept in concepts:
-                    _write({"concept": concept["id"], "input": str(input_path), "ok": 0, "refused": 0,
+                    _write({"concept": concept.id, "input": str(input_path), "ok": 0, "refused": 0,
                             "elapsed": "0.00", "out_w": 0, "out_h": 0, "error": "입력 이미지 읽기 실패"})
                 continue
             aspect = ai_transform.slot_aspect_for(raw)
@@ -131,24 +113,21 @@ def main() -> int:
 
             for concept in concepts:
                 for rep in range(1, args.repeat + 1):
-                    res = ai_transform.AIResult(False, error="실행 오류")
-                    try:
-                        res = provider.transform(upload, concept["prompt"], args.timeout)
-                    except Exception as e:   # Provider는 예외를 던지지 않아야 하지만 PoC도 멈추지 않게
-                        res = ai_transform.AIResult(False, error=f"예외: {type(e).__name__}")
+                    # 실서비스(AITransformManager)와 같은 재시도 규칙 사용, 예외를 던지지 않음
+                    res = ai_transform.transform_with_retry(provider, upload, concept.prompt, args.timeout)
                     out_w = out_h = 0
                     if res.ok and res.image_bgr is not None:
                         out_h, out_w = res.image_bgr.shape[:2]
                         final = ai_transform.postprocess_result(res.image_bgr, aspect)
-                        out_file = args.out / f"{stem}__{concept['id']}__{rep}.jpg"
+                        out_file = args.out / f"{stem}__{concept.id}__{rep}.jpg"
                         if not cv2.imwrite(str(out_file), final, [int(cv2.IMWRITE_JPEG_QUALITY), 95]):
                             res.ok = False
                             res.error = f"결과 저장 실패: {out_file}"
                     status = "성공" if res.ok else ("거절" if res.refused else "실패")
-                    print(f"  {input_path.name} / {concept['id']} #{rep}: {status} "
+                    print(f"  {input_path.name} / {concept.id} #{rep}: {status} "
                           f"{res.elapsed:.1f}s {out_w}x{out_h} {res.error}")
                     _write({
-                        "concept": concept["id"], "input": str(input_path),
+                        "concept": concept.id, "input": str(input_path),
                         "ok": int(res.ok), "refused": int(res.refused),
                         "elapsed": f"{res.elapsed:.2f}", "out_w": out_w, "out_h": out_h,
                         "error": res.error,
