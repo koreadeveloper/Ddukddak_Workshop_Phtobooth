@@ -109,7 +109,12 @@ def main() -> int:
             writer.writerow(row)
             f.flush()
 
+        used_stems: dict[str, int] = {}
         for input_path in args.inputs:
+            # 다른 폴더의 같은 파일명이 서로 덮어쓰지 않도록 이름 구분
+            count = used_stems.get(input_path.stem, 0)
+            used_stems[input_path.stem] = count + 1
+            stem = input_path.stem if count == 0 else f"{input_path.stem}_{count + 1}"
             raw = cv2.imread(str(input_path), cv2.IMREAD_COLOR)
             if raw is None:
                 for concept in concepts:
@@ -119,7 +124,7 @@ def main() -> int:
             aspect = ai_transform.slot_aspect_for(raw)
             upload = ai_transform.prepare_upload_image(raw)
             if args.save_upload:
-                cv2.imwrite(str(args.out / f"{input_path.stem}__upload.jpg"), upload,
+                cv2.imwrite(str(args.out / f"{stem}__upload.jpg"), upload,
                             [int(cv2.IMWRITE_JPEG_QUALITY), ai_transform.JPEG_QUALITY])
 
             for concept in concepts:
@@ -133,7 +138,7 @@ def main() -> int:
                     if res.ok and res.image_bgr is not None:
                         out_h, out_w = res.image_bgr.shape[:2]
                         final = ai_transform.postprocess_result(res.image_bgr, aspect)
-                        out_file = args.out / f"{input_path.stem}__{concept['id']}__{rep}.jpg"
+                        out_file = args.out / f"{stem}__{concept['id']}__{rep}.jpg"
                         cv2.imwrite(str(out_file), final, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
                     status = "성공" if res.ok else ("거절" if res.refused else "실패")
                     print(f"  {input_path.name} / {concept['id']} #{rep}: {status} "
