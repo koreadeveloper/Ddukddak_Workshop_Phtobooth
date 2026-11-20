@@ -30,11 +30,26 @@ class PortraitTest(unittest.TestCase):
         self.assertAlmostEqual((x + face_width / 2) / width, 0.5, delta=0.01)
         self.assertAlmostEqual((y + face_height / 2) / height, 0.44, delta=0.01)
 
-    def test_prepare_rejects_no_face_or_multiple_faces(self):
-        for boxes, message in (([], "얼굴"), ([self.face, self.face], "한 명")):
-            with self.subTest(boxes=boxes), patch("id_portrait._detect_faces", return_value=boxes):
-                with self.assertRaisesRegex(ValueError, message):
-                    prepare_portrait(self.frame)
+    def test_prepare_chooses_center_face_and_ignores_small_detection(self):
+        small = np.array([100, 100, 25, 25, 105, 108, 117, 108, 111, 113, 107, 118, 115, 118, .99])
+        central = np.append(self.face, .88)
+        with patch("id_portrait._detect_faces", return_value=[small, central]):
+            portrait = prepare_portrait(self.frame)
+        self.assertAlmostEqual((portrait.face_box[0] + portrait.face_box[2] / 2) / 680, 0.5, delta=.02)
+
+    def test_prepare_chooses_more_confident_detection_near_center(self):
+        lower = np.append(self.face.copy(), .8)
+        higher = np.append(self.face.copy(), .98)
+        higher[1] += 20
+        higher[5:14:2] += 20
+        with patch("id_portrait._detect_faces", return_value=[lower, higher]):
+            portrait = prepare_portrait(self.frame)
+        self.assertAlmostEqual(portrait.landmarks[0, 1], (292 - (240 + 90 - (180 / .44) * .44)) * (980 / (180 / .44)), delta=2)
+
+    def test_prepare_rejects_no_face(self):
+        with patch("id_portrait._detect_faces", return_value=[]):
+            with self.assertRaisesRegex(ValueError, "얼굴"):
+                prepare_portrait(self.frame)
 
     def test_prepare_rejects_a_face_too_near_the_edge(self):
         face = self.face.copy()
@@ -65,8 +80,7 @@ class PortraitTest(unittest.TestCase):
         edited = cv2.resize(portrait.image_bgr, (600, 900))
         result = finalize_portrait(portrait, edited)
         self.assertEqual(result.shape, portrait.image_bgr.shape)
-        with self.assertRaisesRegex(ValueError, "한 명"):
-            prepare_portrait(np.hstack((image, image)))
+        self.assertEqual(prepare_portrait(np.hstack((image, image))).image_bgr.shape, (980, 680, 3))
         with self.assertRaisesRegex(ValueError, "얼굴을 찾지 못했어요"):
             prepare_portrait(np.full_like(self.frame, 160))
 

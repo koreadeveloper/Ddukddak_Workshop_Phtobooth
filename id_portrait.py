@@ -73,8 +73,30 @@ def _detect_faces(image: np.ndarray) -> list[np.ndarray]:
             np.all(np.isfinite(face)) and 0 <= x < x + face_width <= resized_width
             and 0 <= y < y + face_height <= resized_height
         ):
-            inside_frame.append(face[:14] / scale)
+            detection = face.copy()
+            detection[:14] /= scale
+            inside_frame.append(detection)
     return inside_frame
+
+
+def _primary_face(faces: list[np.ndarray], image_shape) -> np.ndarray | None:
+    """작은 주변 검출을 제외하고 화면 중앙과 검출 신뢰도가 높은 얼굴을 고릅니다."""
+    if not faces:
+        return None
+    largest = max(min(face[2], face[3]) for face in faces)
+    candidates = [face for face in faces if min(face[2], face[3]) >= max(65, largest * 0.35)]
+    if not candidates:
+        return None
+    height, width = image_shape[:2]
+
+    def score(face):
+        x, y, w, h = face[:4]
+        distance = math.hypot((x + w / 2 - width / 2) / (width / 2),
+                              (y + h / 2 - height / 2) / (height / 2))
+        confidence = float(face[14]) if len(face) > 14 else 1.0
+        return confidence - 0.35 * distance
+
+    return max(candidates, key=score)
 
 
 def _require_image(image: np.ndarray, message: str) -> None:
@@ -104,9 +126,9 @@ def prepare_portrait(frame_bgr: np.ndarray) -> PreparedPortrait:
     faces = _detect_faces(frame_bgr)
     if not faces:
         raise ValueError("얼굴을 찾지 못했어요. 화면 가운데에서 정면을 봐 주세요.")
-    if len(faces) != 1:
-        raise ValueError("사진에는 한 명만 들어와 주세요.")
-    face = faces[0]
+    face = _primary_face(faces, frame_bgr.shape)
+    if face is None:
+        raise ValueError("얼굴이 너무 작아요. 카메라에 조금 더 가까이 와 주세요.")
     x, y, width, height = (float(value) for value in face[:4])
     if min(width, height) < 65:
         raise ValueError("얼굴이 너무 작아요. 카메라에 조금 더 가까이 와 주세요.")
@@ -180,6 +202,6 @@ def finalize_portrait(prepared: PreparedPortrait, transformed_bgr: np.ndarray) -
     _require_image(transformed_bgr, "AI 사진을 읽을 수 없어요. 이 컷을 다시 찍어 주세요.")
     target = _normalize_result(transformed_bgr)
     faces = _detect_faces(target)
-    if len(faces) != 1:
+    if _primary_face(faces, target.shape) is None:
         raise ValueError(_ALIGNMENT_ERROR)
     return target
