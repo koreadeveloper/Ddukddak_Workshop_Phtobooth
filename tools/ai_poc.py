@@ -109,12 +109,14 @@ def main() -> int:
             writer.writerow(row)
             f.flush()
 
-        used_stems: dict[str, int] = {}
+        used_stems: set[str] = set()
         for input_path in args.inputs:
             # 다른 폴더의 같은 파일명이 서로 덮어쓰지 않도록 이름 구분
-            count = used_stems.get(input_path.stem, 0)
-            used_stems[input_path.stem] = count + 1
-            stem = input_path.stem if count == 0 else f"{input_path.stem}_{count + 1}"
+            stem, n = input_path.stem, 1
+            while stem in used_stems:
+                n += 1
+                stem = f"{input_path.stem}_{n}"
+            used_stems.add(stem)
             raw = cv2.imread(str(input_path), cv2.IMREAD_COLOR)
             if raw is None:
                 for concept in concepts:
