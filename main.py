@@ -46,12 +46,25 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
+INPUT_GUARD_SECS = 0.25   # 상태 전환 직후 입력 무시 시간 (터치 중복 클릭 방지)
+CONCEPT_CATEGORY_NAMES = {
+    "profile": "프로필", "job": "직업", "traditional": "전통",
+    "stage": "무대", "sports": "스포츠", "fun": "재미",
+}
+DEFAULT_AI_CONSENT_TEXT = (
+    "촬영한 사진은 AI 변환을 위해 외부 AI 서버로 전송됩니다.|"
+    "변환이 끝난 사진은 이 부스에만 저장되며 {days}일 후 자동 삭제됩니다.|"
+    "만 14세 미만은 보호자와 함께 동의해 주세요."
+)
+
 
 # ════════════════════════════════════════════════════
 #  상태 상수
 # ════════════════════════════════════════════════════
 class St:
     IDLE      = "idle"
+    CONCEPT_SELECT = "concept_select"
+    CONSENT   = "consent"
     COUNTDOWN = "countdown"
     FLASH     = "flash"
     AI_PROCESSING = "ai_processing"
@@ -340,6 +353,8 @@ class PhotoBooth:
 
         left_card = pygame.Rect(margin, card_top, left_w, card_h)
         right_card = pygame.Rect(right_x, card_top, right_w, card_h)
+        # 오른쪽 카드 내용 높이(인쇄 매수 버튼 아래까지 538px)가 카드보다 크면 세로 간격 축소
+        v = min(1.0, (card_h - 10) / 540)
 
         preview_h = min(
             card_h - 92,
@@ -356,7 +371,7 @@ class PhotoBooth:
         portrait_thumb_h = max(108, int(portrait_thumb_w * 1.45))
 
         thumb_grid_x = inner_x
-        thumb_grid_y = right_card.y + 88
+        thumb_grid_y = right_card.y + int(88 * v)
         divider_x = thumb_grid_x + 2 * thumb_w + thumb_gap + 24
         control_x = divider_x + 26
         choice_gap = 12
@@ -369,6 +384,7 @@ class PhotoBooth:
         action_x = margin
 
         return {
+            "v": v,
             "left_card": left_card,
             "right_card": right_card,
             "preview_h": preview_h,
@@ -467,6 +483,14 @@ class PhotoBooth:
         self.ai_generation = 0
         self.session_mode = "normal"
         self._ai_saved_look = None
+        self.ai_mode_offered = AI_ENABLED   # AI 켜짐 → IDLE 시작 버튼 2개
+        self.concept_page = 0
+        self.concept_selected = None
+        self.ai_screen_input_at = 0.0
+        self.idle_notice = ""
+        self.idle_notice_until = 0.0
+        self._concept_thumb_cache = {}
+        self._ai_slot_cache = {}
         if AI_ENABLED:
             self._init_ai()
         self.status_lines = []
@@ -521,6 +545,7 @@ class PhotoBooth:
             self.btn_status = Button(
                 1540, 38, 270, 58, "운영 점검", (110, 110, 120), radius=18
             )
+        self._build_ai_buttons()
         self.review_frame_buttons = []
         self.review_filter_buttons = []
         if self.compact_ui:
@@ -531,22 +556,23 @@ class PhotoBooth:
             button_h = 42
             for i, (theme_id, theme) in enumerate(composer.FRAME_THEMES.items()):
                 x = panel_x + (i % 2) * (col_w + col_gap)
-                y = layout["right_card"].y + 88 + (i // 2) * 50
+                y = layout["right_card"].y + int((88 + (i // 2) * 50) * layout["v"])
                 self.review_frame_buttons.append(
                     (theme_id, Button(x, y, col_w, button_h, theme["name"], C_WHITE,
                                       C_DARK, radius=14, border_color=C_LGRAY, border_width=2))
                 )
+            orient_y = layout["right_card"].y + int(258 * layout["v"])
             self.review_orientation_buttons = [
-                ("portrait", Button(panel_x, layout["right_card"].y + 258, col_w, button_h,
+                ("portrait", Button(panel_x, orient_y, col_w, button_h,
                                     "세로", C_WHITE, C_DARK, radius=14,
                                     border_color=C_LGRAY, border_width=2)),
-                ("landscape", Button(panel_x + col_w + col_gap, layout["right_card"].y + 258,
+                ("landscape", Button(panel_x + col_w + col_gap, orient_y,
                                      col_w, button_h, "가로", C_WHITE, C_DARK, radius=14,
                                      border_color=C_LGRAY, border_width=2)),
             ]
             for i, (filter_id, meta) in enumerate(FILTERS.items()):
                 x = layout["filter_x"] + i * (layout["filter_w"] + layout["filter_gap"])
-                y = layout["right_card"].y + 384
+                y = layout["right_card"].y + int(384 * layout["v"])
                 self.review_filter_buttons.append(
                     (filter_id, Button(x, y, layout["filter_w"], button_h, meta["name"],
                                        C_WHITE, C_DARK, radius=14,
@@ -572,7 +598,7 @@ class PhotoBooth:
                 "선택 컷 다시 찍기", C_WHITE, C_DARK, radius=14,
                 border_color=C_LGRAY, border_width=2
             )
-            copies_y = layout["right_card"].y + 492
+            copies_y = layout["right_card"].y + int(492 * layout["v"])
             copies_mid = layout["right_card"].x + layout["right_card"].width // 2
             self.btn_copies_minus = Button(copies_mid - 86, copies_y, 46, 46, "-",
                                            C_WHITE, C_PINK, radius=12,
@@ -583,6 +609,16 @@ class PhotoBooth:
             self.btn_status_close = Button(
                 SCREEN_W // 2 - 140, SCREEN_H - 92, 280, 58, "돌아가기", C_BLUE, radius=18
             )
+            # AI 리뷰 버튼: 방향 버튼 자리(right_card.y + 222 ~ 300) 재사용
+            ai_x = panel_x
+            ai_w = 2 * col_w + col_gap
+            ai_y = layout["right_card"].y + int(222 * layout["v"])
+            self.btn_ai_toggle = Button(ai_x, ai_y, ai_w, 36, "원본/AI 전환",
+                                        C_WHITE, C_DARK, radius=12,
+                                        border_color=C_LGRAY, border_width=2)
+            self.btn_ai_regen = Button(ai_x, ai_y + 40, ai_w, 36, "선택 컷 다시 변환",
+                                       C_WHITE, C_PINK, radius=12,
+                                       border_color=C_PINK, border_width=2)
         else:
             for i, (theme_id, theme) in enumerate(composer.FRAME_THEMES.items()):
                 x = 1120 + (i % 2) * 220
@@ -621,6 +657,10 @@ class PhotoBooth:
             self.btn_status_close = Button(
                 SCREEN_W // 2 - 165, SCREEN_H - 140, 330, 72, "돌아가기", C_BLUE, radius=20
             )
+            self.btn_ai_regen = Button(700, 744, 316, 64, "선택 컷 다시 변환", C_WHITE, C_PINK,
+                                       radius=18, border_color=C_PINK, border_width=2)
+            self.btn_ai_toggle = Button(700, 824, 316, 64, "원본/AI 전환", C_WHITE, C_DARK,
+                                        radius=18, border_color=C_LGRAY, border_width=2)
         self._audit_button_layout()
 
         PHOTOS_DIR.mkdir(parents=True, exist_ok=True)
@@ -667,6 +707,7 @@ class PhotoBooth:
         self.ai_regen_count = 0
         self.ai_processing_started_at = 0.0
         self._ai_recompose_needed = False
+        self._ai_slot_cache = {}
 
     # ─────────────────────────────────────────────────
     #  AI 변신 (session_mode == "ai"일 때만 사용)
@@ -786,33 +827,492 @@ class PhotoBooth:
         if self.snd_done:
             self.snd_done.play()
 
+    def _ai_concept_by_id(self, concept_id):
+        for concept in self.ai_concepts:
+            if concept.id == concept_id:
+                return concept
+        return None
+
+    def _set_idle_notice(self, text: str, seconds: float = 3.5):
+        self.idle_notice = text
+        self.idle_notice_until = time.time() + seconds
+
+    def _open_concept_select(self):
+        if not self._ai_available():
+            self._set_idle_notice("AI 변신을 지금 사용할 수 없어요. 일반 네컷을 이용해 주세요.")
+            return
+        self.concept_page = 0
+        self.concept_selected = None
+        self.ai_screen_input_at = time.time()
+        self._set_state(St.CONCEPT_SELECT)
+
+    def _concept_pages(self) -> int:
+        per = self.concept_per_page
+        return max(1, (len(self.ai_concepts) + per - 1) // per)
+
+    def _ai_select_timed_out(self) -> bool:
+        last = max(self.ai_screen_input_at, self.state_time)
+        if time.time() - last <= AI_SELECT_TIMEOUT:
+            return False
+        log.info(f"{self.state} 화면 {AI_SELECT_TIMEOUT}초 무입력 → 대기 화면")
+        self._set_state(St.IDLE)
+        return True
+
+    def _handle_concept_click(self, pos):
+        self.ai_screen_input_at = time.time()
+        pages = self._concept_pages()
+        if pages > 1 and self.btn_concept_prev.hit(pos):
+            self.concept_page = (self.concept_page - 1) % pages
+            return
+        if pages > 1 and self.btn_concept_next.hit(pos):
+            self.concept_page = (self.concept_page + 1) % pages
+            return
+        if self.btn_concept_back.hit(pos):
+            self._set_state(St.IDLE)
+            return
+        if self.btn_concept_confirm.hit(pos):
+            concept = self._ai_concept_by_id(self.concept_selected)
+            if concept is None:
+                return  # 카드를 먼저 골라야 함 (2단계 확인)
+            if AI_REQUIRE_CONSENT:
+                self._set_state(St.CONSENT)
+            else:
+                self._begin_ai_session(concept)
+            return
+        base = self.concept_page * self.concept_per_page
+        for i, btn in enumerate(self.concept_card_buttons):
+            idx = base + i
+            if idx < len(self.ai_concepts) and btn.hit(pos):
+                self.concept_selected = self.ai_concepts[idx].id
+                return
+
+    def _ai_toggle_selected(self):
+        if self._composing:
+            self._set_review_notice("사진 합성 중입니다. 잠시 후 다시 눌러 주세요.")
+            return
+        i = self.selected_retake_index
+        if not 0 <= i < len(self.captured_raw_bgr):
+            return
+        if self.ai_results[i] is None:
+            self._set_review_notice(f"{i + 1}번 컷은 AI 결과가 없어 원본만 쓸 수 있어요.")
+            return
+        self.ai_use_original[i] = not self.ai_use_original[i]
+        source = "원본" if self.ai_use_original[i] else "AI"
+        self._set_review_notice(f"{i + 1}번 컷을 {source} 사진으로 바꿨어요.")
+        self._recompose_current_session()
+
+    def _ai_regenerate_selected(self):
+        if self._composing:
+            self._set_review_notice("사진 합성 중입니다. 잠시 후 다시 눌러 주세요.")
+            return
+        i = self.selected_retake_index
+        if not 0 <= i < len(self.captured_raw_bgr):
+            self._set_review_notice("다시 변환할 컷을 먼저 선택해 주세요.")
+            return
+        if self.ai_regen_count >= AI_MAX_REGEN_PER_SESSION:
+            self._set_review_notice(f"다시 변환은 한 번 촬영에 {AI_MAX_REGEN_PER_SESSION}번까지 할 수 있어요.")
+            return
+        self.ai_regen_count += 1
+        booth_stats.increment("ai_regenerate")
+        log.info(f"{i + 1}번 컷 다시 변환 ({self.ai_regen_count}/{AI_MAX_REGEN_PER_SESSION})")
+        self._ai_submit(i, self.captured_raw_bgr[i])
+        if self.ai_status[i] == "pending":
+            self._enter_ai_processing()
+        else:
+            self._recompose_current_session()
+
+    # ── AI 화면 버튼 좌표 (FHD 고정 / compact) ──
+    def _build_ai_buttons(self):
+        cx = SCREEN_W // 2
+        if self.compact_ui:
+            bw, bh, gap, radius = 300, 64, 20, 22
+            idle_y = SCREEN_H - 86
+        else:
+            bw, bh, gap, radius = 440, 92, 40, 28
+            idle_y = 930
+        self.btn_start_normal = Button(cx - gap // 2 - bw, idle_y, bw, bh, "일반 네컷",
+                                       C_WHITE, C_PINK, radius=radius,
+                                       border_color=C_PINK, border_width=3)
+        self.btn_start_ai = Button(cx + gap // 2, idle_y, bw, bh, "AI 변신 네컷",
+                                   C_PINK, radius=radius)
+
+        cols, rows = 4, 2
+        if self.compact_ui:
+            card_gap, top = 16, 100
+            nav_w, nav_h = 300, 60
+            nav_y = SCREEN_H - nav_h - 20
+            card_w = min(240, (SCREEN_W - 56 * 2 - card_gap * (cols - 1)) // cols)
+            card_h = min(260, (nav_y - 16 - top - card_gap) // rows)
+            page_w, page_h, page_gap = 40, 96, 8
+        else:
+            card_gap, top = 30, 170
+            nav_w, nav_h = 440, 92
+            nav_y = 950
+            card_w, card_h = 380, 360
+            page_w, page_h, page_gap = 80, 120, 30
+        grid_w = cols * card_w + (cols - 1) * card_gap
+        grid_h = rows * card_h + (rows - 1) * card_gap
+        gx = (SCREEN_W - grid_w) // 2
+        self.concept_per_page = cols * rows
+        self.concept_grid_bottom = top + grid_h
+        self.concept_card_buttons = [
+            Button(gx + (i % cols) * (card_w + card_gap), top + (i // cols) * (card_h + card_gap),
+                   card_w, card_h, f"콘셉트 카드 {i + 1}", C_WHITE, C_DARK, radius=18)
+            for i in range(self.concept_per_page)
+        ]
+        page_y = top + (grid_h - page_h) // 2
+        self.btn_concept_prev = Button(gx - page_gap - page_w, page_y, page_w, page_h, "이전",
+                                       C_WHITE, C_PINK, radius=14,
+                                       border_color=C_PINK, border_width=2)
+        self.btn_concept_next = Button(gx + grid_w + page_gap, page_y, page_w, page_h, "다음",
+                                       C_WHITE, C_PINK, radius=14,
+                                       border_color=C_PINK, border_width=2)
+        self.btn_concept_back = Button(cx - gap // 2 - nav_w, nav_y, nav_w, nav_h, "뒤로",
+                                       C_WHITE, C_DARK, radius=radius,
+                                       border_color=C_LGRAY, border_width=2)
+        self.btn_concept_confirm = Button(cx + gap // 2, nav_y, nav_w, nav_h, "이 콘셉트로 촬영",
+                                          C_PINK, radius=radius)
+
+        consent_y = SCREEN_H - 100 if self.compact_ui else 880
+        self.btn_consent_no = Button(cx - gap // 2 - bw, consent_y, bw, bh, "동의 안 함",
+                                     C_WHITE, C_DARK, radius=radius,
+                                     border_color=C_LGRAY, border_width=2)
+        self.btn_consent_yes = Button(cx + gap // 2, consent_y, bw, bh, "동의하고 촬영",
+                                      C_PINK, radius=radius)
+
+    # ── AI 화면 그리기 ──
+    def _draw_check(self, cx, cy, r):
+        pygame.draw.circle(self.screen, C_GREEN, (cx, cy), r)
+        pygame.draw.circle(self.screen, C_WHITE, (cx, cy), r, 2)
+        pts = [(cx - r * 0.45, cy), (cx - r * 0.1, cy + r * 0.38), (cx + r * 0.5, cy - r * 0.35)]
+        pygame.draw.lines(self.screen, C_WHITE, False, pts, max(2, r // 5))
+
+    def _draw_pill(self, text, font, color, cx, cy, text_color=C_WHITE, pad=14, h=None):
+        tw, th = font.size(text)
+        h = h or th + 10
+        rect = pygame.Rect(0, 0, tw + pad * 2, h)
+        rect.center = (int(cx), int(cy))
+        draw_rrect(self.screen, color, rect, radius=h // 2)
+        draw_text(self.screen, text, font, text_color, rect.centerx, rect.centery, anchor="center")
+        return rect
+
+    def _draw_fit_button(self, btn, font=None):
+        font = font or self.f_small
+        if font.size(btn.label)[0] > btn.rect.width - 24:
+            font = self.f_tiny
+        btn.draw(self.screen, font)
+        if self._composing and self.state == St.REVIEW:
+            dim = pygame.Surface(btn.rect.size, pygame.SRCALPHA)
+            dim.fill((180, 180, 180, 120))
+            self.screen.blit(dim, btn.rect.topleft)
+
+    def _draw_ai_badge(self, rect, i, compact: bool):
+        use_ai = (i < len(self.ai_results) and self.ai_results[i] is not None
+                  and not self.ai_use_original[i])
+        font = self.f_tiny if compact else self.f_small
+        text = "AI" if use_ai else "원본"
+        tw, th = font.size(text)
+        w, h = tw + (14 if compact else 22), th + 6
+        badge = pygame.Rect(rect.right - w - 4, rect.y + 4, w, h)
+        draw_rrect(self.screen, C_PINK if use_ai else C_GRAY, badge, radius=h // 2)
+        draw_text(self.screen, text, font, C_WHITE, badge.centerx, badge.centery, anchor="center")
+
+    def _draw_idle_start_buttons(self):
+        font = self.f_large
+        if not self.ai_mode_offered:
+            self.btn_start.draw(self.screen, font)
+            return
+        self.btn_start_normal.draw(self.screen, font)
+        btn = self.btn_start_ai
+        if self._ai_available():
+            btn.set_style(C_PINK, C_WHITE)
+            btn.draw(self.screen, font)
+        else:
+            # AI 사용 불가: 회색 처리 + 안내 문구 (누르면 안내만)
+            btn.set_style((185, 185, 192), C_WHITE)
+            label = btn.label
+            btn.label = ""
+            btn.draw(self.screen, font)
+            btn.label = label
+            off = 12 if self.compact_ui else 16
+            draw_text(self.screen, label, self.f_medium, C_WHITE,
+                      btn.rect.centerx, btn.rect.centery - off, anchor="center",
+                      max_width=btn.rect.width - 24)
+            draw_text(self.screen, "AI 서버 연결 확인 중", self.f_tiny, C_WHITE,
+                      btn.rect.centerx, btn.rect.centery + off + 4, anchor="center",
+                      max_width=btn.rect.width - 24)
+        if self.idle_notice and time.time() < self.idle_notice_until:
+            tw = min(SCREEN_W - 80, self.f_small.size(self.idle_notice)[0] + 48)
+            th = self.f_small.get_height() + 22
+            toast = pygame.Rect(0, 0, tw, th)
+            toast.midbottom = (SCREEN_W // 2, btn.rect.y - 16)
+            bg = pygame.Surface(toast.size, pygame.SRCALPHA)
+            pygame.draw.rect(bg, (40, 30, 40, 215), bg.get_rect(), border_radius=th // 2)
+            self.screen.blit(bg, toast.topleft)
+            draw_text(self.screen, self.idle_notice, self.f_small, C_WHITE,
+                      toast.centerx, toast.centery, anchor="center", max_width=tw - 32)
+
+    def _draw_select_timer(self):
+        last = max(self.ai_screen_input_at, self.state_time)
+        remain = max(0, int(AI_SELECT_TIMEOUT - (time.time() - last)))
+        draw_text(self.screen, f"{remain}초 후 처음 화면으로", self.f_tiny, C_GRAY,
+                  SCREEN_W - (110 if self.compact_ui else 130), SCREEN_H - (10 if self.compact_ui else 18),
+                  anchor="center", max_width=230)
+
+    def _concept_thumb_surface(self, concept, size):
+        if concept.thumbnail_path is None:
+            return None
+        key = (concept.id, size)
+        if key in self._concept_thumb_cache:
+            return self._concept_thumb_cache[key]
+        surf = None
+        try:
+            img = pygame.image.load(str(concept.thumbnail_path)).convert()
+            iw, ih = img.get_size()
+            scale = max(size[0] / iw, size[1] / ih)
+            img = pygame.transform.smoothscale(img, (max(1, int(iw * scale)), max(1, int(ih * scale))))
+            rect = pygame.Rect(0, 0, *size)
+            rect.center = (img.get_width() // 2, img.get_height() // 2)
+            surf = img.subsurface(rect).copy()
+        except Exception as e:
+            log.warning(f"AI 콘셉트 썸네일 로드 실패 ({concept.id}): {type(e).__name__}")
+        self._concept_thumb_cache[key] = surf
+        return surf
+
+    def _draw_concept_card(self, btn, concept, selected: bool):
+        import ai_concepts
+        r = btn.rect
+        compact = self.compact_ui
+        draw_card(self.screen, r, radius=18)
+        pad = 10 if compact else 14
+        name_h = 40 if compact else 52
+        desc_h = 0 if compact else 38
+        thumb = pygame.Rect(r.x + pad, r.y + pad, r.w - pad * 2, r.h - pad * 2 - name_h - desc_h)
+        surf = self._concept_thumb_surface(concept, thumb.size)
+        if surf is not None:
+            self.screen.blit(surf, thumb.topleft)
+        else:
+            color = ai_concepts.CATEGORY_COLORS.get(concept.category, (220, 160, 40))
+            draw_rrect(self.screen, color, thumb, radius=14)
+            draw_text(self.screen, concept.name, self.f_large, C_WHITE,
+                      thumb.centerx, thumb.centery - (8 if compact else 14), anchor="center",
+                      max_width=thumb.w - 20)
+            draw_text(self.screen, CONCEPT_CATEGORY_NAMES.get(concept.category, ""),
+                      self.f_tiny if compact else self.f_small, (255, 240, 245),
+                      thumb.centerx, thumb.centery + (24 if compact else 36), anchor="center",
+                      max_width=thumb.w - 20)
+        draw_text(self.screen, concept.name, self.f_small if compact else self.f_medium, C_DARK,
+                  r.centerx, thumb.bottom + name_h // 2 + 2, anchor="center", max_width=r.w - 20)
+        if desc_h and concept.description:
+            draw_text(self.screen, concept.description, self.f_tiny, C_GRAY,
+                      r.centerx, thumb.bottom + name_h + desc_h // 2 - 6, anchor="center",
+                      max_width=r.w - 24)
+        if selected:
+            pygame.draw.rect(self.screen, C_PINK, r.inflate(6, 6), 6, border_radius=21)
+            self._draw_check(r.right - 22, r.y + 22, 17 if compact else 22)
+
+    def _draw_page_arrow(self, btn, direction: int):
+        draw_rrect(self.screen, C_WHITE, btn.rect, radius=14, border=2, bcol=C_PINK)
+        cx, cy = btn.rect.center
+        s = min(btn.rect.w, btn.rect.h) // 4
+        pts = [(cx - s * direction, cy - s * 1.4), (cx + s * direction, cy), (cx - s * direction, cy + s * 1.4)]
+        pygame.draw.polygon(self.screen, C_PINK, pts)
+
+    def _draw_concept_select(self):
+        self.screen.fill(C_BG)
+        compact = self.compact_ui
+        cx = SCREEN_W // 2
+        draw_text(self.screen, "어떤 모습으로 변신할까요?", self.f_big, C_PINK,
+                  cx, 36 if compact else 70, anchor="center",
+                  shadow=True, shadow_color=C_LPINK, shadow_off=3, max_width=SCREEN_W - 80)
+        draw_text(self.screen, "카드를 고른 뒤 [이 콘셉트로 촬영]을 눌러 주세요",
+                  self.f_tiny if compact else self.f_small, C_GRAY,
+                  cx, 78 if compact else 134, anchor="center", max_width=SCREEN_W - 80)
+
+        base = self.concept_page * self.concept_per_page
+        for i, btn in enumerate(self.concept_card_buttons):
+            idx = base + i
+            if idx >= len(self.ai_concepts):
+                break
+            concept = self.ai_concepts[idx]
+            self._draw_concept_card(btn, concept, concept.id == self.concept_selected)
+
+        pages = self._concept_pages()
+        if pages > 1:
+            self._draw_page_arrow(self.btn_concept_prev, -1)
+            self._draw_page_arrow(self.btn_concept_next, 1)
+            draw_text(self.screen, f"{self.concept_page + 1} / {pages}", self.f_tiny, C_GRAY,
+                      cx, (self.concept_grid_bottom + self.btn_concept_back.rect.y) // 2,
+                      anchor="center")
+
+        font = self.f_medium if compact else self.f_large
+        self.btn_concept_back.draw(self.screen, font)
+        if self.concept_selected:
+            self.btn_concept_confirm.set_style(C_PINK, C_WHITE)
+        else:
+            self.btn_concept_confirm.set_style((200, 200, 206), C_WHITE)
+        self.btn_concept_confirm.draw(self.screen, font)
+        self._draw_select_timer()
+
+    def _consent_lines(self) -> list[str]:
+        text = AI_CONSENT_TEXT or DEFAULT_AI_CONSENT_TEXT
+        return [
+            line.strip().replace("{days}", str(PHOTO_RETENTION_DAYS))
+            for line in text.split("|") if line.strip()
+        ]
+
+    def _draw_consent(self):
+        self.screen.fill(C_BG)
+        compact = self.compact_ui
+        cx = SCREEN_W // 2
+        draw_text(self.screen, "AI 변신 전에 확인해 주세요", self.f_big, C_PINK,
+                  cx, 40 if compact else 80, anchor="center", max_width=SCREEN_W - 80)
+        concept = self._ai_concept_by_id(self.concept_selected)
+        if concept is not None:
+            self._draw_pill(f"{concept.name} 변신", self.f_small if compact else self.f_medium,
+                            C_PINK, cx, 92 if compact else 166)
+        if compact:
+            card = pygame.Rect(40, 124, SCREEN_W - 80, self.btn_consent_no.rect.y - 24 - 124)
+        else:
+            card = pygame.Rect(260, 220, 1400, 600)
+        draw_card(self.screen, card, radius=18)
+        lines = self._consent_lines()
+        step = min(110 if not compact else 70, (card.h - 40) // max(1, len(lines)))
+        y = card.y + 20 + step // 2 + (card.h - 40 - step * len(lines)) // 2
+        for line in lines:
+            font = self.f_medium
+            if font.size(line)[0] > card.w - 80:
+                font = self.f_small
+            draw_text(self.screen, f"· {line}", font, C_DARK, cx, y, anchor="center",
+                      max_width=card.w - 60)
+            y += step
+        font = self.f_medium if compact else self.f_large
+        self.btn_consent_no.draw(self.screen, font)
+        self.btn_consent_yes.draw(self.screen, font)
+        self._draw_select_timer()
+
+    def _ai_slot_surface(self, idx: int, w: int, h: int):
+        if idx >= len(self.captured_raw_bgr):
+            return None
+        if self.ai_status[idx] == "done" and self.ai_results[idx] is not None:
+            img, kind = self.ai_results[idx], "ai"
+        else:
+            img, kind = self.captured_raw_bgr[idx], "raw"
+        key = (idx, kind, id(img), w, h)
+        surf = self._ai_slot_cache.get(key)
+        if surf is None:
+            if kind == "raw":
+                import ai_transform
+                img = ai_transform.crop_to_aspect(img, ai_transform.slot_aspect_for(img))
+            surf = fit_bgr_to_surface(img, w, h)
+            self._ai_slot_cache = {k: v for k, v in self._ai_slot_cache.items() if k[0] != idx}
+            self._ai_slot_cache[key] = surf
+        return surf
+
     def _draw_ai_processing(self):
         self.screen.fill(C_BG)
+        compact = self.compact_ui
+        cx = SCREEN_W // 2
         concept = self._ai_concept()
-        cx, cy = SCREEN_W // 2, SCREEN_H // 2
-        line = max(48, SCREEN_H // 14)
-        draw_text(self.screen, "AI가 변신 중이에요", self.f_big, C_DARK,
-                  cx, cy - line * 3, anchor="center", max_width=SCREEN_W - 80)
+        draw_text(self.screen, "AI가 변신 중이에요", self.f_big, C_PINK,
+                  cx, 44 if compact else 90, anchor="center",
+                  shadow=True, shadow_color=C_LPINK, shadow_off=3, max_width=SCREEN_W - 80)
         if concept is not None:
-            draw_text(self.screen, f"{concept.name} 변신", self.f_medium, C_PINK,
-                      cx, cy - line * 2, anchor="center", max_width=SCREEN_W - 80)
-        done = sum(1 for st in self.ai_status if st != "pending")
-        draw_text(self.screen, f"{done} / {PHOTO_COUNT} 완료", self.f_large, C_DARK,
-                  cx, cy - line // 2, anchor="center", max_width=SCREEN_W - 80)
-        labels = {"pending": "변환 중", "done": "AI 완료", "failed": "원본 사용",
-                  "refused": "원본 사용", "timeout": "원본 사용", "idle": "-"}
-        status = "   ".join(f"{i + 1}번 {labels.get(st, st)}" for i, st in enumerate(self.ai_status))
-        draw_text(self.screen, status, self.f_small, C_GRAY,
-                  cx, cy + line // 2, anchor="center", max_width=SCREEN_W - 80)
+            draw_text(self.screen, f"{concept.name} 변신", self.f_medium, C_DARK,
+                      cx, 92 if compact else 162, anchor="center", max_width=SCREEN_W - 80)
+
+        n = PHOTO_COUNT
+        if compact:
+            gap = 20
+            slot_w = (SCREEN_W - 80 - gap * (n - 1)) // n
+            slot_h = min(int(slot_w * 1.33), SCREEN_H - 330)
+            y0 = 124
+        else:
+            gap, slot_w, slot_h, y0 = 40, 360, 480, 220
+        x0 = (SCREEN_W - (n * slot_w + (n - 1) * gap)) // 2
+        badge_font = self.f_tiny if compact else self.f_small
+        dots = "." * (int(time.time() * 2.5) % 4)
+        for i in range(n):
+            r = pygame.Rect(x0 + i * (slot_w + gap), y0, slot_w, slot_h)
+            draw_card(self.screen, r, radius=16)
+            inner = r.inflate(-16, -16)
+            st = self.ai_status[i] if i < len(self.ai_status) else "idle"
+            surf = self._ai_slot_surface(i, inner.w, inner.h)
+            if surf is not None:
+                sw, sh = surf.get_size()
+                pos = (inner.x + (inner.w - sw) // 2, inner.y + (inner.h - sh) // 2)
+                self.screen.blit(surf, pos)
+                if st == "pending":
+                    dim = pygame.Surface((sw, sh), pygame.SRCALPHA)
+                    dim.fill((255, 255, 255, 110))
+                    self.screen.blit(dim, pos)
+            if st == "done":
+                text, color = "AI 완료", C_GREEN
+                self._draw_check(r.right - 24, r.y + 24, 16 if compact else 22)
+            elif st == "pending":
+                text, color = f"변환 중{dots}", C_PINK
+            elif st == "idle":
+                text, color = "대기", C_LGRAY
+            else:
+                text, color = "원본 사용", C_GRAY
+            pill_h = 30 if compact else 42
+            self._draw_pill(text, badge_font, color, r.centerx, r.bottom - 14 - pill_h // 2, h=pill_h)
+            draw_rrect(self.screen, C_PINK, (r.x + 8, r.y + 8, pill_h, pill_h), radius=pill_h // 2)
+            draw_text(self.screen, str(i + 1), badge_font, C_WHITE,
+                      r.x + 8 + pill_h // 2, r.y + 8 + pill_h // 2, anchor="center")
+
+        settled = sum(1 for st in self.ai_status if st not in ("pending", "idle"))
+        bar_w = min(1000, SCREEN_W - 160)
+        bar_h = 20 if compact else 28
+        bar_y = y0 + slot_h + (36 if compact else 60)
+        bar = pygame.Rect(cx - bar_w // 2, bar_y, bar_w, bar_h)
+        draw_rrect(self.screen, C_LGRAY, bar, radius=bar_h // 2)
+        if settled:
+            draw_rrect(self.screen, C_PINK, (bar.x, bar.y, int(bar_w * settled / n), bar_h),
+                       radius=bar_h // 2)
         elapsed = int(time.time() - self.ai_processing_started_at)
-        draw_text(self.screen, f"{elapsed}초 경과 · 보통 20~30초 걸려요", self.f_small, C_GRAY,
-                  cx, cy + line * 3 // 2, anchor="center", max_width=SCREEN_W - 80)
+        draw_text(self.screen, f"{settled} / {n} 완료 · {elapsed}초 경과", self.f_medium, C_DARK,
+                  cx, bar.bottom + (30 if compact else 44), anchor="center", max_width=SCREEN_W - 80)
+        draw_text(self.screen, "보통 20~30초 걸려요. 잠시만 기다려 주세요!", self.f_small, C_GRAY,
+                  cx, bar.bottom + (64 if compact else 96), anchor="center", max_width=SCREEN_W - 80)
+
 
     def _audit_button_layout(self):
+        review_common = [
+            self.btn_print,
+            self.btn_qr,
+            self.btn_retake,
+            self.btn_retake_selected,
+            self.btn_copies_minus,
+            self.btn_copies_plus,
+            *(btn for _id, btn in self.review_frame_buttons),
+            *(btn for _id, btn in self.review_filter_buttons),
+        ]
         groups = {
             "idle": [
                 self.btn_start,
                 self.btn_status,
+            ],
+            "idle_ai": [
+                self.btn_start_normal,
+                self.btn_start_ai,
+                self.btn_status,
+            ],
+            "concept_select": [
+                *self.concept_card_buttons,
+                self.btn_concept_prev,
+                self.btn_concept_next,
+                self.btn_concept_back,
+                self.btn_concept_confirm,
+            ],
+            "consent": [
+                self.btn_consent_no,
+                self.btn_consent_yes,
+            ],
+            "review_ai": [
+                *review_common,
+                self.btn_ai_toggle,
+                self.btn_ai_regen,
             ],
             "review": [
                 self.btn_print,
@@ -828,6 +1328,9 @@ class PhotoBooth:
             "status": [self.btn_status_close],
         }
         for group_name, buttons in groups.items():
+            for btn in buttons:
+                if not pygame.Rect(0, 0, SCREEN_W, SCREEN_H).contains(btn.rect):
+                    log.warning(f"UI 버튼 화면 밖: {group_name} '{btn.label}' {btn.rect}")
             for i, first in enumerate(buttons):
                 for second in buttons[i + 1:]:
                     if first.rect.colliderect(second.rect):
@@ -1353,6 +1856,9 @@ class PhotoBooth:
                 self._update_display_transform()
                 continue
 
+            # 상태 전환 직후 입력 무시 (터치 중복/연타로 다음 화면 버튼이 눌리는 것 방지)
+            input_guard = time.time() - self.state_time < INPUT_GUARD_SECS
+
             # ── 키보드 ────────────────────────────────
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
@@ -1360,14 +1866,15 @@ class PhotoBooth:
                 if event.key == pygame.K_q and (
                         pygame.key.get_mods() & pygame.KMOD_CTRL):
                     return False
+                if input_guard:
+                    continue
 
                 if self.state == St.IDLE:
                     if event.key == pygame.K_s:
                         self._refresh_status()
                         self._set_state(St.STATUS)
-                    elif event.key == pygame.K_a and self._ai_available():
-                        # 임시 (Phase 2): A 키 = 첫 번째 콘셉트로 AI 모드 시작
-                        self._begin_ai_session(self.ai_concepts[0])
+                    elif event.key == pygame.K_a and self.ai_mode_offered:
+                        self._open_concept_select()
                     else:
                         self._begin_countdown()
                 elif self.state == St.QR_SHOW:
@@ -1378,20 +1885,37 @@ class PhotoBooth:
             # ── 마우스/터치 클릭 ──────────────────────
             if event.type in (pygame.MOUSEBUTTONDOWN, pygame.FINGERDOWN):
                 if event.type == pygame.FINGERDOWN:
-                    pos = (int(event.x * SCREEN_W), int(event.y * SCREEN_H))
+                    # 터치 좌표(0~1)는 창 전체 기준 → 실제 픽셀로 바꾼 뒤 UI 배율/여백 반영
+                    pos = self._event_pos_to_ui(
+                        (event.x * self.display_w, event.y * self.display_h)
+                    )
                 else:
                     if event.button != 1:
                         continue
+                    if getattr(event, "touch", False):
+                        continue  # 터치로 합성된 마우스 이벤트는 FINGERDOWN에서 이미 처리
                     pos = self._event_pos_to_ui(event.pos)
 
+                if input_guard:
+                    continue
                 self._handle_click(pos)
 
         # 버튼 hover 업데이트
         if self.state == St.IDLE:
             self.btn_start.update(mpos, mpressed)
+            self.btn_start_normal.update(mpos, mpressed)
+            self.btn_start_ai.update(mpos, mpressed)
             self.btn_status.update(mpos, mpressed)
+        elif self.state == St.CONCEPT_SELECT:
+            for btn in (self.btn_concept_prev, self.btn_concept_next,
+                        self.btn_concept_back, self.btn_concept_confirm):
+                btn.update(mpos, mpressed)
+        elif self.state == St.CONSENT:
+            self.btn_consent_no.update(mpos, mpressed)
+            self.btn_consent_yes.update(mpos, mpressed)
         elif self.state == St.REVIEW:
-            for btn in (self.btn_print, self.btn_qr, self.btn_retake, self.btn_retake_selected):
+            for btn in (self.btn_print, self.btn_qr, self.btn_retake, self.btn_retake_selected,
+                        self.btn_ai_toggle, self.btn_ai_regen):
                 btn.update(mpos, mpressed)
             for _, btn in self.review_frame_buttons:
                 btn.update(mpos, mpressed)
@@ -1412,7 +1936,26 @@ class PhotoBooth:
                 self._refresh_status()
                 self._set_state(St.STATUS)
                 return
-            self._begin_countdown()
+            if not self.ai_mode_offered:
+                self._begin_countdown()  # 기존: 아무 곳이나 터치하면 시작
+                return
+            # AI 활성 시에는 버튼을 정확히 눌러야 시작
+            if self.btn_start_normal.hit(pos):
+                self._begin_countdown()
+            elif self.btn_start_ai.hit(pos):
+                self._open_concept_select()
+
+        elif self.state == St.CONCEPT_SELECT:
+            self._handle_concept_click(pos)
+
+        elif self.state == St.CONSENT:
+            self.ai_screen_input_at = time.time()
+            concept = self._ai_concept_by_id(self.concept_selected)
+            if self.btn_consent_yes.hit(pos) and concept is not None:
+                self._begin_ai_session(concept)
+            elif self.btn_consent_no.hit(pos):
+                log.info("AI 변신 동의 안 함 → 대기 화면")
+                self._set_state(St.IDLE)
 
         elif self.state == St.REVIEW:
             for i, rect in enumerate(self._review_thumb_rects()):
@@ -1437,11 +1980,17 @@ class PhotoBooth:
                     if self._set_filter(filter_id):
                         self._recompose_current_session()
                     return
+            if self.session_mode == "ai":
+                if self.btn_ai_toggle.hit(pos):
+                    self._ai_toggle_selected()
+                    return
+                if self.btn_ai_regen.hit(pos):
+                    self._ai_regenerate_selected()
+                    return
             for orientation, btn in self.review_orientation_buttons:
+                if self.session_mode == "ai":
+                    break  # AI 모드에서는 방향 버튼 숨김
                 if btn.hit(pos):
-                    if self.session_mode == "ai":
-                        self._set_review_notice("AI 변신 모드에서는 촬영 방향을 바꿀 수 없어요.")
-                        return
                     if self._composing:
                         self._set_review_notice("사진 합성 중입니다. 잠시 후 다시 눌러 주세요.")
                         return
@@ -1530,7 +2079,7 @@ class PhotoBooth:
                           SCREEN_W // 2, preview_top + preview_h // 2,
                           anchor="center", max_width=760)
 
-            self.btn_start.draw(self.screen, self.f_large)
+            self._draw_idle_start_buttons()
             return
 
         # FHD 15.6인치 모니터 기준 첫 화면: 제목, 실제 출력 크롭, 시작 버튼만 배치합니다.
@@ -1558,7 +2107,7 @@ class PhotoBooth:
             draw_text(self.screen, "카메라 연결을 확인하고 있습니다", self.f_medium, C_GRAY,
                       SCREEN_W // 2, 520, anchor="center", max_width=1000)
 
-        self.btn_start.draw(self.screen, self.f_large)
+        self._draw_idle_start_buttons()
 
         # 하단 정보
         if FOOTER_TEXT:
@@ -1607,8 +2156,15 @@ class PhotoBooth:
             shot_label = f"{self.retake_index + 1}번 컷 다시 찍기"
         else:
             shot_label = f"{len(self.captured_bgr) + 1} / {PHOTO_COUNT}"
+        concept = self._ai_concept() if self.session_mode == "ai" else None
+        if concept is not None:
+            # AI 모드 콘셉트 배지: "소방관 변신 · 2 / 4"
+            shot_label = f"{concept.name} 변신 · {shot_label}"
+            label_w = min(SCREEN_W - 80, self.f_large.size(shot_label)[0] + 56)
+            draw_rrect(self.screen, C_PINK,
+                       (SCREEN_W // 2 - label_w // 2, 8, label_w, 74), radius=37)
         draw_text(self.screen, shot_label, self.f_large, C_WHITE,
-                  SCREEN_W // 2, 44, anchor="center", max_width=1200)
+                  SCREEN_W // 2, 44, anchor="center", max_width=min(1200, SCREEN_W - 120))
 
         # 카운트다운 숫자 (그림자 + 펄스 효과)
         pulse = 1.0 + 0.06 * math.sin(time.time() * 6)
@@ -1646,6 +2202,9 @@ class PhotoBooth:
             draw_rrect(self.screen, C_WHITE, (rx - 4, sy - 4, tw + 8, th + 8), 8)
             sw, sh = surf.get_size()
             self.screen.blit(surf, (rx + (tw - sw) // 2, sy + (th - sh) // 2))
+            if (self.session_mode == "ai" and i < len(self.ai_status)
+                    and self.ai_status[i] == "done"):
+                self._draw_check(rx + tw - 8, sy + 8, 13)
 
     # ═══════════════════════════════════════════════
     #  FLASH 렌더링
@@ -1690,6 +2249,8 @@ class PhotoBooth:
         layout = self._compact_review_layout()
         left_card = layout["left_card"]
         right_card = layout["right_card"]
+        v = layout["v"]
+        ai_mode = self.session_mode == "ai"
 
         draw_text(self.screen, "사진 확인", self.f_big, C_PINK,
                   SCREEN_W // 2, 34, anchor="center", max_width=760)
@@ -1717,13 +2278,17 @@ class PhotoBooth:
 
         theme_name = composer.FRAME_THEMES[self.selected_frame_theme]["name"]
         filter_name = FILTERS[self.selected_filter]["name"]
-        draw_text(self.screen, f"{theme_name} 프레임 · {filter_name} 필터 · 2x2 · {self.print_copies}장",
+        look_text = f"{theme_name} 프레임 · {filter_name} 필터 · 2x2 · {self.print_copies}장"
+        concept = self._ai_concept() if ai_mode else None
+        if concept is not None:
+            look_text = f"{concept.name} · {theme_name} · {filter_name} · 2x2 · {self.print_copies}장"
+        draw_text(self.screen, look_text,
                   self.f_small, C_DARK, left_card.centerx, left_card.bottom - 38,
                   anchor="center", max_width=left_card.width - 46)
 
         rects = self._review_thumb_rects()
         draw_text(self.screen, "촬영 컷", self.f_medium, C_DARK,
-                  rects[0].x, right_card.y + 36, anchor="topleft", max_width=260)
+                  rects[0].x, right_card.y + int(36 * v), anchor="topleft", max_width=260)
 
         if self.thumb_surfaces:
             for i, surf in enumerate(self.thumb_surfaces[:4]):
@@ -1737,6 +2302,8 @@ class PhotoBooth:
                            (rect.x + 4, rect.y + 4, 28, 28), radius=14)
                 draw_text(self.screen, str(i + 1), self.f_tiny, C_WHITE,
                           rect.x + 18, rect.y + 18, anchor="center")
+                if ai_mode:
+                    self._draw_ai_badge(rect, i, compact=True)
         else:
             for i, rect in enumerate(rects):
                 border_color = C_PINK if i == self.selected_retake_index else C_LGRAY
@@ -1748,47 +2315,52 @@ class PhotoBooth:
         divider_x = layout["divider_x"]
         pygame.draw.line(
             self.screen, C_LGRAY,
-            (divider_x, right_card.y + 42),
-            (divider_x, right_card.y + 292),
+            (divider_x, right_card.y + int(42 * v)),
+            (divider_x, right_card.y + int(292 * v)),
             2,
         )
 
         panel_x = layout["control_x"]
         draw_text(self.screen, "프레임", self.f_medium, C_DARK,
-                  panel_x, right_card.y + 42, anchor="topleft", max_width=250)
+                  panel_x, right_card.y + int(42 * v), anchor="topleft", max_width=250)
         self._draw_selected_button_group(
             self.selected_frame_theme, self.review_frame_buttons, C_PINK)
 
         pygame.draw.line(
             self.screen, C_LGRAY,
-            (panel_x, right_card.y + 210),
-            (right_card.right - 28, right_card.y + 210),
+            (panel_x, right_card.y + int(210 * v)),
+            (right_card.right - 28, right_card.y + int(210 * v)),
             1,
         )
-        draw_text(self.screen, "촬영 방향", self.f_medium, C_DARK,
-                  panel_x, right_card.y + 222, anchor="topleft", max_width=250)
-        self._draw_selected_button_group(
-            self.capture_orientation, self.review_orientation_buttons, C_BLUE)
+        if ai_mode:
+            # 방향 버튼 자리를 AI 버튼 2개로 재사용
+            self._draw_fit_button(self.btn_ai_toggle)
+            self._draw_fit_button(self.btn_ai_regen)
+        else:
+            draw_text(self.screen, "촬영 방향", self.f_medium, C_DARK,
+                      panel_x, right_card.y + int(222 * v), anchor="topleft", max_width=250)
+            self._draw_selected_button_group(
+                self.capture_orientation, self.review_orientation_buttons, C_BLUE)
 
         pygame.draw.line(
             self.screen, C_LGRAY,
-            (right_card.x + 24, right_card.y + 326),
-            (right_card.right - 24, right_card.y + 326),
+            (right_card.x + 24, right_card.y + int(326 * v)),
+            (right_card.right - 24, right_card.y + int(326 * v)),
             1,
         )
         draw_text(self.screen, "필터", self.f_medium, C_DARK,
-                  layout["filter_x"], right_card.y + 348, anchor="topleft", max_width=280)
+                  layout["filter_x"], right_card.y + int(348 * v), anchor="topleft", max_width=280)
         self._draw_selected_button_group(
             self.selected_filter, self.review_filter_buttons, C_BLUE)
 
         pygame.draw.line(
             self.screen, C_LGRAY,
-            (right_card.x + 24, right_card.y + 452),
-            (right_card.right - 24, right_card.y + 452),
+            (right_card.x + 24, right_card.y + int(452 * v)),
+            (right_card.right - 24, right_card.y + int(452 * v)),
             1,
         )
         draw_text(self.screen, "인쇄 매수", self.f_medium, C_DARK,
-                  layout["filter_x"], right_card.y + 454, anchor="topleft", max_width=200)
+                  layout["filter_x"], right_card.y + int(454 * v), anchor="topleft", max_width=200)
         self.btn_copies_minus.draw(self.screen, self.f_large)
         self.btn_copies_plus.draw(self.screen, self.f_large)
         copies_center_x = (self.btn_copies_minus.rect.right + self.btn_copies_plus.rect.left) // 2
@@ -1866,6 +2438,8 @@ class PhotoBooth:
                            (rect.x + 4, rect.y + 4, 36, 36), radius=18)
                 draw_text(self.screen, str(i + 1), self.f_small, C_WHITE,
                           rect.x + 22, rect.y + 22, anchor="center")
+                if self.session_mode == "ai":
+                    self._draw_ai_badge(rect, i, compact=False)
         else:
             # 썸네일 아직 없을 때 (빠르게 생성되므로 드뭄)
             for i in range(4):
@@ -1877,6 +2451,9 @@ class PhotoBooth:
                   self.f_tiny, C_GRAY, 858, 626, anchor="center",
                   max_width=390)
         self.btn_retake_selected.draw(self.screen, self.f_small)
+        if self.session_mode == "ai":
+            self._draw_fit_button(self.btn_ai_regen)
+            self._draw_fit_button(self.btn_ai_toggle)
 
         # ── 우측: 촬영 후 프레임/필터 선택 ─────────────
         draw_text(self.screen, "프레임 다시 선택", self.f_medium, C_DARK,
@@ -1884,10 +2461,19 @@ class PhotoBooth:
         self._draw_selected_button_group(
             self.selected_frame_theme, self.review_frame_buttons, C_PINK)
 
-        draw_text(self.screen, "촬영 방향 다시 선택", self.f_medium, C_DARK,
-                  1120, 314, anchor="topleft")
-        self._draw_selected_button_group(
-            self.capture_orientation, self.review_orientation_buttons, C_BLUE)
+        concept = self._ai_concept() if self.session_mode == "ai" else None
+        if self.session_mode == "ai":
+            # AI 모드에서는 방향 버튼을 숨기고 콘셉트 정보를 표시
+            left = max(0, AI_MAX_REGEN_PER_SESSION - self.ai_regen_count)
+            draw_text(self.screen, "AI 변신", self.f_medium, C_DARK,
+                      1120, 314, anchor="topleft")
+            draw_text(self.screen, f"{concept.name if concept else ''} · 다시 변환 {left}회 남음",
+                      self.f_small, C_PINK, 1120, 370, anchor="topleft", max_width=440)
+        else:
+            draw_text(self.screen, "촬영 방향 다시 선택", self.f_medium, C_DARK,
+                      1120, 314, anchor="topleft")
+            self._draw_selected_button_group(
+                self.capture_orientation, self.review_orientation_buttons, C_BLUE)
 
         draw_text(self.screen, "필터 다시 선택", self.f_medium, C_DARK,
                   1120, 436, anchor="topleft")
@@ -1896,7 +2482,10 @@ class PhotoBooth:
 
         theme_name = composer.FRAME_THEMES[self.selected_frame_theme]["name"]
         filter_name = FILTERS[self.selected_filter]["name"]
-        draw_text(self.screen, f"{theme_name} 프레임 · {filter_name} 필터 · 2x2 고정",
+        look_text = f"{theme_name} 프레임 · {filter_name} 필터 · 2x2 고정"
+        if concept is not None:
+            look_text = f"{concept.name} · {theme_name} 프레임 · {filter_name} 필터 · 2x2"
+        draw_text(self.screen, look_text,
                   self.f_small, C_GRAY, 1340, 690, anchor="center",
                   max_width=500)
 
@@ -2088,6 +2677,14 @@ class PhotoBooth:
             # ── 상태별 업데이트 & 렌더링 ───────────────
             if self.state == St.IDLE:
                 self._draw_idle(dt)
+
+            elif self.state == St.CONCEPT_SELECT:
+                if not self._ai_select_timed_out():
+                    self._draw_concept_select()
+
+            elif self.state == St.CONSENT:
+                if not self._ai_select_timed_out():
+                    self._draw_consent()
 
             elif self.state == St.COUNTDOWN:
                 self._update_countdown()
