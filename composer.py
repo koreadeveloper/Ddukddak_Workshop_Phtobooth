@@ -232,6 +232,8 @@ def _make_id_sheet(photos: list[np.ndarray]) -> Image.Image:
         row, col = divmod(index, 2)
         x = left + col * (ID_PHOTO_W + ID_PHOTO_GAP)
         y = top + row * (ID_PHOTO_H + ID_PHOTO_GAP)
+        if photo is None:
+            continue
         sheet.paste(_center_crop(_bgr_to_pil(photo), ID_PHOTO_W, ID_PHOTO_H), (x, y))
 
         # 재단선은 사진 영역 바깥에만 배치합니다.

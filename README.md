@@ -40,7 +40,7 @@ chmod +x install.sh run.sh
 
 ## AI 변신 네컷 (선택)
 
-기본값은 꺼짐입니다. Nano Banana 2.1을 사용할 수 있는 [MonoRouter Universal API 키](https://monogpt.kr/support/kr/articles/monorouter-api-key)를 발급해 `.env`에 넣고 켭니다. 기존 설정에서 전환하는 경우 아래 값으로 바꾸세요.
+기본값은 꺼짐입니다. GPT Image 2.6을 사용할 수 있는 [MonoRouter Universal API 키](https://monogpt.kr/support/kr/articles/monorouter-api-key)를 발급해 `.env`에 넣고 켭니다. 기존 설정에서 전환하는 경우 아래 값으로 바꾸세요.
 
 ```bash
 PHOTOBOOTH_AI_ENABLED=1
@@ -59,12 +59,14 @@ python3 doctor.py --ai-live  # 실제 변환 1장 테스트 (비용 발생)
 
 ## 박람회용 AI 증명사진
 
-AI를 켠 상태에서 시작 화면의 증명사진 모드를 선택합니다. 얼굴이 한 개만 검출되면 촬영한 얼굴과 선택한 복장을 합성해 밝은 단색 배경의 사진을 만듭니다.
+AI를 켠 상태에서 시작 화면의 증명사진 모드를 선택합니다. 얼굴이 한 개만 검출되면 사진을 AI로 편집해 선택한 복장과 밝은 단색 배경의 사진을 만듭니다.
 
 - **한 사람**은 사진 한 컷을 촬영해 같은 사진 4장을 출력합니다.
 - **여러 사람**은 2~4명을 선택해 한 명씩 동의·촬영합니다. 사람마다 한 컷씩 배치하고 빈 칸은 그대로 둡니다.
 
 Canon SELPHY CP1500의 RP-108 엽서(절취 후 100×148mm)에 가로 34mm × 세로 49mm 사진을 2×2로 배치합니다. 인쇄에는 300dpi PDF와 배율을 유지하는 CUPS 옵션을 사용합니다. 행사 전에 실물 한 장을 출력해 재단 표시 사이를 자로 확인하세요.
+
+인쇄 미리보기에서 각 칸을 누르면 이번 촬영과 저장된 최근 증명사진을 선택할 수 있습니다. 편집된 개별 사진과 인화지는 `photos/`에 저장되며 사진 보관 설정에 따라 정리됩니다.
 
 라즈베리파이 설치, 프린터 등록, 자동 실행 설정은 [RASPBERRY_PI5_SETUP.md](RASPBERRY_PI5_SETUP.md)를 보세요.
 오늘 개발한 내용과 다음 개발자를 위한 코드 구조/운영 인수인계는 [DEVELOPMENT_HANDOFF.md](DEVELOPMENT_HANDOFF.md)를 보세요.

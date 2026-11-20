@@ -44,24 +44,17 @@ class PortraitTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 prepare_portrait(self.frame)
 
-    def test_composite_preserves_the_original_face_and_edited_clothes(self):
+    def test_edited_image_is_used_without_pasting_the_original_face(self):
         portrait = self.prepare()
         edited = np.full_like(portrait.image_bgr, (180, 90, 35))
         face = np.concatenate((portrait.face_box, portrait.landmarks.ravel()))
         with patch("id_portrait._detect_faces", return_value=[face]):
             result = finalize_portrait(portrait, edited)
-        x, y, width, height = portrait.face_box
-        face_pixel = (y + height // 2, x + width // 2)
-        np.testing.assert_array_equal(result[face_pixel], portrait.image_bgr[face_pixel])
-        np.testing.assert_array_equal(result[-30, result.shape[1] // 2], edited[-30, edited.shape[1] // 2])
-        self.assertEqual(result.shape, portrait.image_bgr.shape)
-        self.assertTrue(np.any((result[:, :, 0] > 65) & (result[:, :, 0] < 180)))
+        np.testing.assert_array_equal(result, edited)
 
-    def test_composite_rejects_a_shifted_generated_face(self):
+    def test_rejects_generated_image_without_a_face(self):
         portrait = self.prepare()
-        face = np.concatenate((portrait.face_box, portrait.landmarks.ravel()))
-        face[0] += portrait.face_box[2] // 2
-        with patch("id_portrait._detect_faces", return_value=[face]):
+        with patch("id_portrait._detect_faces", return_value=[]):
             with self.assertRaisesRegex(ValueError, "얼굴 위치"):
                 finalize_portrait(portrait, portrait.image_bgr)
 

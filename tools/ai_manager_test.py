@@ -264,6 +264,15 @@ def test_monorouter_provider():
     healthy, _ = provider.health_check()
     check("MonoRouter 상태 확인은 이미지 호출 없이 크레딧 조회",
           healthy and provider._session.get.call_args.args[0].endswith("/v1/credits"))
+    image_provider = ai_transform.MonoRouterImageProvider("test-key")
+    image_provider._session = Mock()
+    response = image_provider._session.post.return_value
+    response.status_code = 200
+    response.json.return_value = {"data": [{"b64_json": encoded}]}
+    image_result = image_provider.transform(photo, "Edit the outfit", 10)
+    args, kwargs = image_provider._session.post.call_args
+    check("GPT Image 2.6 multipart 편집", args[0].endswith("/v1/images/edits")
+          and kwargs["data"]["model"] == "gpt-image-2.6" and image_result.ok)
 
 
 def main() -> int:

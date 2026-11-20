@@ -375,6 +375,48 @@ class MonoRouterProvider(GeminiProvider):
         return False, f"MonoRouter 크레딧 조회 실패 (HTTP {resp.status_code})"
 
 
+class MonoRouterImageProvider(MonoRouterProvider):
+    """MonoRouter의 multipart 이미지 편집 API."""
+
+    def __init__(self, api_key: str, model: str = ""):
+        super().__init__(api_key, model or "gpt-image-2.6")
+
+    def transform(self, image_bgr: np.ndarray, prompt: str, timeout: float) -> AIResult:
+        started = time.monotonic()
+        if not self.has_key:
+            return AIResult(False, error=f"API 키 없음 ({self.key_env})")
+        try:
+            encoded = encode_jpeg(image_bgr)
+            height, width = image_bgr.shape[:2]
+            size = "1536x1024" if width > height else "1024x1536"
+            response = self._session.post(
+                f"{self._api_base}/images/edits",
+                headers=self._headers(),
+                data={"model": self.model, "prompt": prompt, "size": size},
+                files={"image": ("photo.jpg", encoded, "image/jpeg")},
+                timeout=(min(10.0, timeout), timeout), allow_redirects=False,
+            )
+            elapsed = time.monotonic() - started
+            if response.status_code != 200:
+                error = _api_error_message(response)
+                return AIResult(False, error=error, elapsed=elapsed,
+                                refused=_looks_refused(error),
+                                retryable=response.status_code == 429 or response.status_code >= 500)
+            data = response.json()
+            for item in data.get("data", []):
+                if item.get("b64_json"):
+                    image = decode_image(base64.b64decode(item["b64_json"], validate=True))
+                    if image is not None:
+                        return AIResult(True, image_bgr=image, elapsed=elapsed)
+            return AIResult(False, error="MonoRouter 응답에 편집 이미지 없음", elapsed=elapsed)
+        except requests.Timeout:
+            return AIResult(False, error="요청 시간 초과", elapsed=time.monotonic() - started, retryable=True)
+        except requests.RequestException as exc:
+            return AIResult(False, error=f"네트워크 오류: {type(exc).__name__}", elapsed=time.monotonic() - started, retryable=True)
+        except (ValueError, TypeError, cv2.error) as exc:
+            return AIResult(False, error=f"이미지 처리 실패: {type(exc).__name__}", elapsed=time.monotonic() - started)
+
+
 # ─── Mock (API 없이 흐름 테스트) ─────────────────────
 class MockProvider:
     """지연 후 색조 변환 + 'AI MOCK' 표시. FAIL_RATE로 실패를 흉내냅니다."""
@@ -429,7 +471,7 @@ def get_provider(name: str | None = None) -> AIProvider:
     if name == "gemini":
         return GeminiProvider(cfg.AI_API_KEY, cfg.AI_MODEL)
     if name == "monorouter":
-        return MonoRouterProvider(cfg.AI_MONOROUTER_API_KEY, cfg.AI_MODEL)
+        return MonoRouterImageProvider(cfg.AI_MONOROUTER_API_KEY, cfg.AI_MODEL)
     raise ValueError(f"알 수 없는 AI provider: {name!r} (monorouter | gemini | mock)")
 
 

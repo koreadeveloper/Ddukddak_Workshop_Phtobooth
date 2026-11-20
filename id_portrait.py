@@ -19,7 +19,8 @@ PORTRAIT_PROMPT_SUFFIX = (
     "position, size and angle and the exact locations of their eyes, nose and mouth. "
     "Keep their appearance and expression. Change only the clothing, requested "
     "accessories and background. Keep the chosen outfit visible, use soft even "
-    "front lighting, and leave comfortable margins around the head. "
+    "front lighting that evenly illuminates the entire face, no shadows from hats, "
+    "and leave comfortable margins around the head. "
     "No text, markings, logos, simulated ID documents or other people."
 )
 
@@ -151,10 +152,10 @@ def _align_face(prepared: PreparedPortrait, face: np.ndarray) -> np.ndarray:
     source_x, source_y, source_width, source_height = prepared.face_box
     x, y, width, height = face[:4]
     if (
-        abs(x + width / 2 - source_x - source_width / 2) > source_width * 0.22
-        or abs(y + height / 2 - source_y - source_height / 2) > source_height * 0.22
-        or not 0.80 <= width / source_width <= 1.25
-        or not 0.80 <= height / source_height <= 1.25
+        abs(x + width / 2 - source_x - source_width / 2) > source_width * 0.55
+        or abs(y + height / 2 - source_y - source_height / 2) > source_height * 0.55
+        or not 0.60 <= width / source_width <= 1.65
+        or not 0.60 <= height / source_height <= 1.65
     ):
         raise ValueError(_ALIGNMENT_ERROR)
 
@@ -163,32 +164,22 @@ def _align_face(prepared: PreparedPortrait, face: np.ndarray) -> np.ndarray:
     center, span, angle = _eyes(target_marks)
     scale = span / source_span
     rotation = source_angle - angle
-    if not 0.82 <= scale <= 1.22 or abs(rotation) > 8:
+    if not 0.60 <= scale <= 1.65 or abs(rotation) > 20:
         raise ValueError(_ALIGNMENT_ERROR)
 
     matrix = cv2.getRotationMatrix2D(tuple(source_center), rotation, scale)
     matrix[:, 2] += center - source_center
     aligned = prepared.landmarks @ matrix[:, :2].T + matrix[:, 2]
-    if np.linalg.norm(aligned[2:] - target_marks[2:], axis=1).max() > span * 0.21:
+    if np.linalg.norm(aligned[2:] - target_marks[2:], axis=1).max() > span * 0.35:
         raise ValueError(_ALIGNMENT_ERROR)
     return matrix
 
 
 def finalize_portrait(prepared: PreparedPortrait, transformed_bgr: np.ndarray) -> np.ndarray:
-    """얼굴 위치를 확인하고 원본 눈·코·입을 포함한 얼굴 영역을 의상과 자연스럽게 합칩니다."""
+    """변환 이미지에서 한 얼굴을 확인하고 출력 규격으로 정리합니다."""
     _require_image(transformed_bgr, "AI 사진을 읽을 수 없어요. 이 컷을 다시 찍어 주세요.")
     target = _normalize_result(transformed_bgr)
     faces = _detect_faces(target)
     if len(faces) != 1:
         raise ValueError(_ALIGNMENT_ERROR)
-    matrix = _align_face(prepared, faces[0])
-
-    x, y, width, height = prepared.face_box
-    mask = np.zeros(prepared.image_bgr.shape[:2], dtype=np.uint8)
-    center = (round(x + width * 0.50), round(y + height * 0.52))
-    axes = (round(width * 0.42), round(height * 0.45))
-    cv2.ellipse(mask, center, axes, 0, 0, 360, 255, thickness=-1)
-    mask = cv2.GaussianBlur(mask, (0, 0), sigmaX=width * 0.035)
-    alpha = cv2.warpAffine(mask, matrix, PORTRAIT_SIZE)[:, :, None].astype(np.float32) / 255
-    original = cv2.warpAffine(prepared.image_bgr, matrix, PORTRAIT_SIZE)
-    return np.rint(alpha * original + (1 - alpha) * target).astype(np.uint8)
+    return target

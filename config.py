@@ -202,10 +202,12 @@ C_GREEN   = ( 50, 195,  95)   # 초록
 
 # ─── 한국어 폰트 후보 (라즈베리파이 OS 기준) ─────────────
 FONT_CANDIDATES = [
+    str(BASE_DIR / "assets" / "fonts" / "Jua-Regular.ttf"),
     "/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf",
     "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
     "/usr/share/fonts/truetype/fonts-nanum/NanumGothicBold.ttf",
     "/usr/share/fonts/truetype/fonts-nanum/NanumGothic.ttf",
     "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
     "/usr/share/fonts/noto/NotoSansCJK-Regular.ttc",
+    "/System/Library/Fonts/AppleSDGothicNeo.ttc",
 ]
