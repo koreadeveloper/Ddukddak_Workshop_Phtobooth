@@ -139,7 +139,9 @@ def main() -> int:
                         out_h, out_w = res.image_bgr.shape[:2]
                         final = ai_transform.postprocess_result(res.image_bgr, aspect)
                         out_file = args.out / f"{stem}__{concept['id']}__{rep}.jpg"
-                        cv2.imwrite(str(out_file), final, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
+                        if not cv2.imwrite(str(out_file), final, [int(cv2.IMWRITE_JPEG_QUALITY), 95]):
+                            res.ok = False
+                            res.error = f"결과 저장 실패: {out_file}"
                     status = "성공" if res.ok else ("거절" if res.refused else "실패")
                     print(f"  {input_path.name} / {concept['id']} #{rep}: {status} "
                           f"{res.elapsed:.1f}s {out_w}x{out_h} {res.error}")
