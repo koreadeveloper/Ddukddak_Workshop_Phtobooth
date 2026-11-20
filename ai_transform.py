@@ -110,8 +110,9 @@ def postprocess_result(result_bgr: np.ndarray, target_aspect: float) -> np.ndarr
     return np.ascontiguousarray(crop_to_aspect(result_bgr, target_aspect))
 
 
-# ─── Gemini (REST, requests) ─────────────────────────
+# ─── Gemini (Interactions API REST, requests) ────────
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta"
+GEMINI_API_REVISION = "2026-05-20"
 # 2026-11 공식 문서 기준 최신 Stable 이미지 편집 모델. 바뀌면 PHOTOBOOTH_AI_MODEL로 교체.
 GEMINI_DEFAULT_MODEL = "gemini-nano-banana-2.1"
 GEMINI_IMAGE_SIZE = "1K"
@@ -119,11 +120,8 @@ GEMINI_ASPECT_RATIOS = {
     "1:1": 1.0, "2:3": 2 / 3, "3:2": 3 / 2, "3:4": 3 / 4, "4:3": 4 / 3,
     "4:5": 4 / 5, "5:4": 5 / 4, "9:16": 9 / 16, "16:9": 16 / 9,
 }
-# promptFeedback.blockReason / candidate.finishReason 중 안전정책 거절로 보는 값
-GEMINI_REFUSAL_REASONS = {
-    "SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST", "SPII", "RECITATION",
-    "IMAGE_SAFETY", "IMAGE_PROHIBITED_CONTENT", "IMAGE_RECITATION",
-}
+# 응답/오류에 이 단어가 있으면 안전정책 거절로 봅니다 (재시도하지 않음)
+GEMINI_REFUSAL_WORDS = ("safety", "prohibited", "blocklist", "blocked", "policy", "spii", "recitation")
 RETRY_BACKOFF_SECS = 1.5
 
 
@@ -134,17 +132,31 @@ def closest_aspect_ratio(target_aspect: float) -> str:
     )
 
 
+def _short(text, limit: int = 160) -> str:
+    return " ".join(str(text or "").split())[:limit]
+
+
+def _looks_refused(*texts) -> bool:
+    joined = " ".join(str(t or "") for t in texts).lower()
+    return any(word in joined for word in GEMINI_REFUSAL_WORDS)
+
+
+def _error_message(err) -> str:
+    if isinstance(err, dict):
+        return _short(err.get("message") or err.get("status") or err.get("code") or "")
+    return _short(err)
+
+
 def _api_error_message(resp) -> str:
     try:
-        msg = (resp.json().get("error") or {}).get("message", "")
+        msg = _error_message(resp.json().get("error"))
     except Exception:
         msg = ""
-    msg = " ".join(str(msg).split())[:160]
     return f"HTTP {resp.status_code}" + (f": {msg}" if msg else "")
 
 
 class GeminiProvider:
-    """Gemini API generateContent로 이미지 편집 (SDK 없이 requests 사용)."""
+    """Gemini Interactions API(POST /v1beta/interactions)로 이미지 편집 (SDK 없이 requests 사용)."""
 
     name = "gemini"
 
@@ -162,63 +174,64 @@ class GeminiProvider:
         return bool(self._api_key)
 
     def _headers(self) -> dict:
-        return {"x-goog-api-key": self._api_key, "Content-Type": "application/json"}
+        return {
+            "x-goog-api-key": self._api_key,
+            "Content-Type": "application/json",
+            "Api-Revision": GEMINI_API_REVISION,
+        }
 
     def _payload(self, image_bgr: np.ndarray, prompt: str) -> dict:
         h, w = image_bgr.shape[:2]
         return {
-            "contents": [{
-                "role": "user",
-                "parts": [
-                    {"text": prompt},
-                    {"inlineData": {
-                        "mimeType": "image/jpeg",
-                        "data": base64.b64encode(encode_jpeg(image_bgr)).decode("ascii"),
-                    }},
-                ],
-            }],
-            "generationConfig": {
-                "responseModalities": ["TEXT", "IMAGE"],
-                "imageConfig": {
-                    "aspectRatio": closest_aspect_ratio(w / h),
-                    "imageSize": GEMINI_IMAGE_SIZE,
+            "model": self.model,
+            "input": [
+                {"type": "text", "text": prompt},
+                {
+                    "type": "image",
+                    "mime_type": "image/jpeg",
+                    "data": base64.b64encode(encode_jpeg(image_bgr)).decode("ascii"),
                 },
+            ],
+            "response_format": {
+                "type": "image",
+                "mime_type": "image/jpeg",
+                "aspect_ratio": closest_aspect_ratio(w / h),
+                "image_size": GEMINI_IMAGE_SIZE,
             },
+            # 기본값은 요청/응답을 서버에 저장하므로 끕니다 (얼굴 사진 개인정보 보호)
+            "store": False,
         }
 
     def _parse_response(self, data: dict) -> AIResult:
-        block = (data.get("promptFeedback") or {}).get("blockReason", "")
-        if block:
-            return AIResult(False, error=f"요청 차단: {block}", refused=True)
-        candidates = data.get("candidates") or []
-        if not candidates:
-            return AIResult(False, error="응답에 결과 없음")
-        cand = candidates[0]
-        finish = cand.get("finishReason", "") or ""
+        status = str(data.get("status") or "")
         image = None
-        text_parts = []
-        for part in (cand.get("content") or {}).get("parts") or []:
-            if part.get("thought"):
-                continue   # 중간 '생각' 이미지는 건너뜀
-            inline = part.get("inlineData") or part.get("inline_data")
-            if inline and inline.get("data"):
-                try:
-                    decoded = decode_image(base64.b64decode(inline["data"]))
-                except Exception:
-                    decoded = None
-                if decoded is not None:
-                    image = decoded
-            elif part.get("text"):
-                text_parts.append(part["text"])
+        texts = []
+        for step in data.get("steps") or []:
+            if step.get("type") != "model_output":
+                continue   # thought 단계의 중간 이미지는 건너뜀
+            for block in step.get("content") or []:
+                if block.get("type") == "image" and block.get("data"):
+                    try:
+                        decoded = decode_image(base64.b64decode(block["data"]))
+                    except Exception:
+                        decoded = None
+                    if decoded is not None:
+                        image = decoded   # 마지막 이미지가 최종 결과
+                elif block.get("type") == "text" and block.get("text"):
+                    texts.append(block["text"])
         if image is not None:
             return AIResult(True, image_bgr=image)
-        if finish in GEMINI_REFUSAL_REASONS:
-            return AIResult(False, error=f"안전정책 거절: {finish}", refused=True)
-        note = " ".join(" ".join(text_parts).split())[:120]
-        return AIResult(
-            False,
-            error=f"이미지 없음 (finishReason={finish or '-'})" + (f" {note}" if note else ""),
-        )
+        err = _error_message(data.get("error"))
+        note = _short(" ".join(texts), 120)
+        detail = f"이미지 없음 (status={status or '-'})"
+        if err:
+            detail += f" {err}"
+        if note:
+            detail += f" {note}"
+        refused = _looks_refused(err, note, data.get("finish_reason"), data.get("block_reason"))
+        if refused:
+            detail = "안전정책 거절: " + detail
+        return AIResult(False, error=detail, refused=refused)
 
     def transform(self, image_bgr: np.ndarray, prompt: str, timeout: float) -> AIResult:
         started = time.monotonic()
@@ -234,7 +247,7 @@ class GeminiProvider:
         except Exception as e:
             return _done(AIResult(False, error=f"전처리 실패: {type(e).__name__}"))
 
-        url = f"{self._api_base}/models/{self.model}:generateContent"
+        url = f"{self._api_base}/interactions"
         error = "알 수 없는 오류"
         for attempt in range(2):   # 네트워크/429/5xx는 1회 재시도
             remaining = timeout - (time.monotonic() - started)
@@ -259,6 +272,8 @@ class GeminiProvider:
                         return _done(AIResult(False, error="응답 JSON 파싱 실패"))
                     return _done(self._parse_response(data))
                 error = _api_error_message(resp)
+                if resp.status_code == 400 and _looks_refused(error):
+                    return _done(AIResult(False, error=f"안전정책 거절: {error}", refused=True))
                 retryable = resp.status_code == 429 or resp.status_code >= 500
             if not retryable or attempt == 1:
                 break
@@ -276,7 +291,7 @@ class GeminiProvider:
         try:
             resp = self._session.get(
                 f"{self._api_base}/models/{self.model}",
-                headers=self._headers(), timeout=timeout,
+                headers={"x-goog-api-key": self._api_key}, timeout=timeout,
             )
         except requests.RequestException as e:
             return False, f"연결 실패: {type(e).__name__}"
