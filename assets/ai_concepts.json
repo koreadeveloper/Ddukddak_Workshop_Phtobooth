@@ -1,0 +1,101 @@
+{
+  "version": 1,
+  "concepts": [
+    {
+      "id": "suit_profile",
+      "name": "정장 프로필",
+      "category": "profile",
+      "description": "취업 사진처럼 깔끔한 정장",
+      "thumbnail": "assets/ai_concepts/suit_profile.jpg",
+      "prompt": "Edit this photo. Keep every person's face, identity, facial features, skin tone, hairstyle, expression, head position, body pose and the exact number of people unchanged. Do not add or remove people. Keep the same camera framing and composition.\n\nChange only: everyone's clothing into a well-fitted navy or charcoal business suit with a crisp white dress shirt and the background into a plain light gray photo studio backdrop.\n\nStyle: clean professional profile portrait, soft even studio lighting, photorealistic, natural lighting, high detail, sharp focus on faces.\nNo text, no watermark, no logos, no real brand or team names.",
+      "print_label": "AI 정장 프로필",
+      "default_frame": "classic_white",
+      "default_filter": "original",
+      "enabled": true
+    },
+    {
+      "id": "firefighter",
+      "name": "소방관",
+      "category": "job",
+      "description": "방화복과 헬멧을 쓴 멋진 소방관",
+      "thumbnail": "assets/ai_concepts/firefighter.jpg",
+      "prompt": "Edit this photo. Keep every person's face, identity, facial features, skin tone, hairstyle, expression, head position, body pose and the exact number of people unchanged. Do not add or remove people. Keep the same camera framing and composition.\n\nChange only: everyone's clothing into a firefighter turnout coat with reflective stripes and a firefighter helmet and the background into the inside of a fire station with a red fire truck.\n\nStyle: heroic documentary photo, photorealistic, natural lighting, high detail, sharp focus on faces.\nNo text, no watermark, no logos, no real brand or team names.",
+      "print_label": "AI 소방관",
+      "default_frame": "studio_black",
+      "default_filter": "original",
+      "enabled": true
+    },
+    {
+      "id": "police",
+      "name": "경찰관",
+      "category": "job",
+      "description": "듬직한 경찰 정복 차림",
+      "thumbnail": "assets/ai_concepts/police.jpg",
+      "prompt": "Edit this photo. Keep every person's face, identity, facial features, skin tone, hairstyle, expression, head position, body pose and the exact number of people unchanged. Do not add or remove people. Keep the same camera framing and composition.\n\nChange only: everyone's clothing into a generic dark navy police dress uniform with a peaked cap and a fictional generic badge, not any real country's insignia and the background into a bright modern police station lobby.\n\nStyle: official uniform portrait, photorealistic, natural lighting, high detail, sharp focus on faces.\nNo text, no watermark, no logos, no real brand or team names.",
+      "print_label": "AI 경찰관",
+      "default_frame": "sky_blue",
+      "default_filter": "original",
+      "enabled": true
+    },
+    {
+      "id": "doctor",
+      "name": "의사",
+      "category": "job",
+      "description": "흰 가운과 청진기의 의사 선생님",
+      "thumbnail": "assets/ai_concepts/doctor.jpg",
+      "prompt": "Edit this photo. Keep every person's face, identity, facial features, skin tone, hairstyle, expression, head position, body pose and the exact number of people unchanged. Do not add or remove people. Keep the same camera framing and composition.\n\nChange only: everyone's clothing into a white doctor's coat over medical scrubs with a stethoscope around the neck and the background into a clean, bright hospital corridor.\n\nStyle: professional medical portrait, photorealistic, natural lighting, high detail, sharp focus on faces.\nNo text, no watermark, no logos, no real brand or team names.",
+      "print_label": "AI 의사",
+      "default_frame": "classic_white",
+      "default_filter": "original",
+      "enabled": true
+    },
+    {
+      "id": "pilot",
+      "name": "파일럿",
+      "category": "job",
+      "description": "제복과 모자를 갖춘 기장님",
+      "thumbnail": "assets/ai_concepts/pilot.jpg",
+      "prompt": "Edit this photo. Keep every person's face, identity, facial features, skin tone, hairstyle, expression, head position, body pose and the exact number of people unchanged. Do not add or remove people. Keep the same camera framing and composition.\n\nChange only: everyone's clothing into an airline pilot uniform with a captain's cap and gold-striped epaulettes, with a generic wing badge and no airline name and the background into an airport apron with a passenger jet behind them.\n\nStyle: aviation editorial photo, photorealistic, natural lighting, high detail, sharp focus on faces.\nNo text, no watermark, no logos, no real brand or team names.",
+      "print_label": "AI 파일럿",
+      "default_frame": "sky_blue",
+      "default_filter": "original",
+      "enabled": true
+    },
+    {
+      "id": "hanbok",
+      "name": "한복",
+      "category": "traditional",
+      "description": "고궁에서 입은 고운 전통 한복",
+      "thumbnail": "assets/ai_concepts/hanbok.jpg",
+      "prompt": "Edit this photo. Keep every person's face, identity, facial features, skin tone, hairstyle, expression, head position, body pose and the exact number of people unchanged. Do not add or remove people. Keep the same camera framing and composition.\n\nChange only: everyone's clothing into elegant traditional Korean hanbok in harmonious colors and the background into a traditional Korean palace courtyard with wooden pavilions.\n\nStyle: elegant cultural portrait, soft daylight, photorealistic, natural lighting, high detail, sharp focus on faces.\nNo text, no watermark, no logos, no real brand or team names.",
+      "print_label": "AI 한복",
+      "default_frame": "soft_pink",
+      "default_filter": "original",
+      "enabled": true
+    },
+    {
+      "id": "idol_stage",
+      "name": "아이돌 무대",
+      "category": "stage",
+      "description": "조명이 빛나는 콘서트 무대 위 아이돌",
+      "thumbnail": "assets/ai_concepts/idol_stage.jpg",
+      "prompt": "Edit this photo. Keep every person's face, identity, facial features, skin tone, hairstyle, expression, head position, body pose and the exact number of people unchanged. Do not add or remove people. Keep the same camera framing and composition.\n\nChange only: everyone's clothing into sparkling, stylish K-pop stage costumes and the background into a concert stage with colorful spotlights, LED screens and light haze.\n\nStyle: concert photography, vibrant stage lighting, no real idol names, photorealistic, natural lighting, high detail, sharp focus on faces.\nNo text, no watermark, no logos, no real brand or team names.",
+      "print_label": "AI 아이돌 무대",
+      "default_frame": "studio_black",
+      "default_filter": "original",
+      "enabled": true
+    },
+    {
+      "id": "baseball",
+      "name": "야구선수",
+      "category": "sports",
+      "description": "가상 팀 유니폼을 입은 야구선수",
+      "thumbnail": "assets/ai_concepts/baseball.jpg",
+      "prompt": "Edit this photo. Keep every person's face, identity, facial features, skin tone, hairstyle, expression, head position, body pose and the exact number of people unchanged. Do not add or remove people. Keep the same camera framing and composition.\n\nChange only: everyone's clothing into a baseball uniform and plain cap of a fictional team with no real team logo and the background into a baseball stadium field with stands.\n\nStyle: sports portrait, fictional team, no real logos, photorealistic, natural lighting, high detail, sharp focus on faces.\nNo text, no watermark, no logos, no real brand or team names.",
+      "print_label": "AI 야구선수",
+      "default_frame": "sky_blue",
+      "default_filter": "original",
+      "enabled": true
+    }
+  ]
+}

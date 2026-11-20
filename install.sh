@@ -56,7 +56,7 @@ echo "  ✓ 가상환경 생성 완료"
 echo "[3/5] Python 패키지 설치 중..."
 if [ "$IS_RPI" = "1" ]; then
     # Pi에서는 apt의 OpenCV/Pygame 빌드를 우선 사용합니다.
-    pip install "qrcode[pil]>=7.4.2" --quiet
+    pip install "qrcode[pil]>=7.4.2" "requests>=2.28.0" --quiet
 else
     pip install -r requirements.txt --quiet
 fi

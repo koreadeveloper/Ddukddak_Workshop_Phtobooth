@@ -80,6 +80,16 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _env_float(name: str, default: float) -> float:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except ValueError:
+        return default
+
+
 def _env_text(name: str, default: str) -> str:
     value = os.getenv(name)
     if value is None:
@@ -155,6 +165,25 @@ QR_SERVER_PORT = _env_int("PHOTOBOOTH_QR_PORT", 8080)
 # ─── 경로 ────────────────────────────────────────────
 PHOTOS_DIR = BASE_DIR / "photos"
 ASSETS_DIR = BASE_DIR / "assets"
+
+# ─── AI 변신 ─────────────────────────────────────────
+# API 키는 반드시 .env의 PHOTOBOOTH_AI_API_KEY로만 넣습니다. 로그/화면에 출력 금지.
+AI_ENABLED = _env_bool("PHOTOBOOTH_AI_ENABLED", False)
+AI_PROVIDER = _env_text("PHOTOBOOTH_AI_PROVIDER", "gemini").lower()
+AI_API_KEY = _env_text("PHOTOBOOTH_AI_API_KEY", "")
+AI_MODEL = _env_text("PHOTOBOOTH_AI_MODEL", "")  # 비우면 provider 기본값 사용
+AI_REQUEST_TIMEOUT = _env_int("PHOTOBOOTH_AI_REQUEST_TIMEOUT", 45)
+AI_TOTAL_TIMEOUT = _env_int("PHOTOBOOTH_AI_TOTAL_TIMEOUT", 90)
+AI_MAX_CONCURRENCY = _env_int("PHOTOBOOTH_AI_MAX_CONCURRENCY", 4)
+AI_UPLOAD_MAX_SIDE = _env_int("PHOTOBOOTH_AI_UPLOAD_MAX_SIDE", 1024)
+AI_MAX_REGEN_PER_SESSION = _env_int("PHOTOBOOTH_AI_MAX_REGEN_PER_SESSION", 4)
+AI_REQUIRE_CONSENT = _env_bool("PHOTOBOOTH_AI_REQUIRE_CONSENT", True)
+AI_SELECT_TIMEOUT = _env_int("PHOTOBOOTH_AI_SELECT_TIMEOUT", 60)
+AI_PRINT_DISCLOSURE = _env_bool("PHOTOBOOTH_AI_PRINT_DISCLOSURE", True)
+AI_SAVE_SOURCES = _env_bool("PHOTOBOOTH_AI_SAVE_SOURCES", False)
+AI_MOCK_DELAY = _env_float("PHOTOBOOTH_AI_MOCK_DELAY", 3.0)
+AI_MOCK_FAIL_RATE = _env_float("PHOTOBOOTH_AI_MOCK_FAIL_RATE", 0.0)
+AI_CONCEPTS_FILE = BASE_DIR / _env_text("PHOTOBOOTH_AI_CONCEPTS_FILE", "assets/ai_concepts.json")
 
 # ─── 색상 팔레트 ──────────────────────────────────────
 C_BG      = (255, 245, 250)   # 연핑크 배경

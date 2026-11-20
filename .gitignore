@@ -19,3 +19,7 @@ booth_stats.json
 Thumbs.db
 .idea/
 .vscode/
+
+# AI 변신 PoC 입력/출력 (커밋 금지)
+samples/
+poc_out/
