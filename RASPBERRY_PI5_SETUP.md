@@ -102,8 +102,8 @@ lpinfo -m | grep -i cp1500
 ```bash
 sudo lpadmin -p CP1500 \
   -E \
-  -v "usb://Canon/CP1500?serial=XXXXXXXX&interface=1" \
-  -m gutenprint.5.3://canonselphycp1500/expert
+  -v 'lpinfo -v에 나온 CP1500 URI' \
+  -m 'lpinfo -m에 나온 CP1500 드라이버 ID'
 
 lpstat -p CP1500
 ```
