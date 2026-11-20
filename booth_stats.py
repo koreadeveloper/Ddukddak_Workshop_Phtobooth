@@ -19,7 +19,14 @@ COUNTERS = (
     "qr_shown",
     "qr_page_views",
     "qr_downloads",
+    "ai_sessions",
+    "ai_requests",
+    "ai_success",
+    "ai_failure",
+    "ai_refused",
+    "ai_regenerate",
 )
+CONCEPT_COUNTS_KEY = "ai_concept_counts"   # 콘셉트별 인기 통계 (COUNTERS와 별도 저장)
 
 _lock = threading.Lock()
 
@@ -72,6 +79,20 @@ def increment(counter: str, amount: int = 1):
         _save_unlocked(data)
 
 
+def increment_concept(concept_id: str, amount: int = 1):
+    """콘셉트별 선택 횟수. 날짜 구분 없이 누적만 합니다."""
+    if not concept_id:
+        return
+    with _lock:
+        data = _load_unlocked()
+        counts = data.get(CONCEPT_COUNTS_KEY)
+        if not isinstance(counts, dict):
+            counts = {}
+            data[CONCEPT_COUNTS_KEY] = counts
+        counts[concept_id] = int(counts.get(concept_id, 0)) + amount
+        _save_unlocked(data)
+
+
 def summary() -> dict:
     with _lock:
         data = _load_unlocked()
@@ -80,4 +101,8 @@ def summary() -> dict:
     return {
         "today": {key: int(today_counts.get(key, 0)) for key in COUNTERS},
         "total": {key: int(total_counts.get(key, 0)) for key in COUNTERS},
+        "concepts": {
+            str(k): int(v) for k, v in (data.get(CONCEPT_COUNTS_KEY) or {}).items()
+            if isinstance(v, (int, float))
+        },
     }
