@@ -1,330 +1,190 @@
-# Raspberry Pi 5 실행 가이드
+# Raspberry Pi 5 설치 안내
 
-대상 구성:
+**설치 환경 기준** · Raspberry Pi 5, Raspberry Pi OS 64-bit Desktop(Bookworm), Logitech C920 USB 웹캠, USB 연결 Canon SELPHY CP1500. 이전에 사용하던 Pi를 다시 설치하거나 새 기기에 옮길 때 아래 순서대로 진행하세요.
 
-- Raspberry Pi 5, Raspberry Pi OS 64-bit Desktop
-- Logitech USB 웹캠, 예: C920/C920e
-- Canon SELPHY CP1500 포토 프린터, USB 연결 권장
-- 터치스크린 또는 HDMI 모니터 + 마우스
+[프로젝트 소개](README.md) · [촬영 및 인쇄 화면](docs/SCREEN_GUIDE.md)
 
-## 1. Pi 준비
+## 1. 장비 연결
 
-Raspberry Pi OS는 Desktop 버전을 사용하세요. Lite 버전은 pygame 전체화면을 띄울 데스크톱 세션이 없어 추가 설정이 필요합니다.
+| 장치 | 연결 방법 |
+| --- | --- |
+| 모니터 | Pi의 micro-HDMI 포트에서 모니터 HDMI로 연결합니다. 모니터의 입력을 해당 HDMI로 바꿉니다. |
+| 웹캠 | Pi의 USB 포트에 연결하고 화면을 보는 사람의 눈높이에 맞춥니다. |
+| 마우스 | Pi의 USB 포트에 연결합니다. 홈, 촬영, 인쇄를 마우스로 조작합니다. |
+| 키보드 | Pi의 USB 포트에 연결합니다. 터미널과 초기 설정에 사용하고, 설치 후에는 분리해도 됩니다. |
+| Canon SELPHY CP1500 | 프린터의 USB-C 포트에서 Pi의 USB 데이터 포트로 연결합니다. Pi 쪽이 USB-A라면 USB-A ↔ USB-C **데이터 케이블**을 사용합니다. 프린터는 자체 전원 어댑터에 연결합니다. |
+| 용지와 잉크 | RP-108 엽서 용지 카세트와 함께 제공되는 잉크 카트리지를 장착합니다. |
+
+[Canon CP1500 연결 사양](https://downloads.canon.com/selphy/SELPHY-CP1500-Spec-Sheet.pdf)
+
+## 2. Raspberry Pi OS 준비
+
+1. 이미 Raspberry Pi OS Desktop이 설치되어 있다면 데스크톱에 로그인하고 다음 단계로 이동합니다.
+2. 새 microSD라면 맥북에서 Raspberry Pi Imager를 실행하고 기기로 **Raspberry Pi 5**, 운영체제로 **Raspberry Pi OS 64-bit Desktop**을 고릅니다. 현장 설치를 그대로 재현하려면 OS 선택 목록에서 **Bookworm 기반 64-bit Desktop** 이미지를 선택합니다. Imager가 선택한 microSD를 초기화하니 저장 장치를 확인하세요.
+3. Imager에서 사용자 이름과 비밀번호, Wi-Fi, 시간대(한국에서는 `Asia/Seoul`)를 설정합니다. 비밀번호는 이후 `sudo` 명령에도 사용합니다.
+4. microSD를 Pi에 꽂고 부팅합니다. 데스크톱에 로그인해 화면 상단의 네트워크 메뉴에서 Wi-Fi 연결을 확인합니다. 설치부터 운영까지 Pi에 연결된 모니터에서 진행할 수 있습니다.
+
+[Raspberry Pi Imager 설치 안내](https://www.raspberrypi.com/documentation/computers/getting-started.html) · [Raspberry Pi OS 이미지](https://www.raspberrypi.com/software/operating-systems/)
+
+## 3. GitHub에서 프로그램 설치
+
+이미 `~/photobooth`에 설치되어 있다면 [업데이트](#업데이트)로 이동하세요. 처음 설치하는 경우 Pi 데스크톱에서 터미널을 열고 아래를 순서대로 실행합니다.
 
 ```bash
 sudo apt update
 sudo apt install -y git
-```
-
-저장소를 Pi에 받습니다.
-
-```bash
 cd ~
 git clone https://github.com/koreadeveloper/Ddukddak_Workshop_Phtobooth.git photobooth
 cd ~/photobooth
-chmod +x install.sh run.sh
-./install.sh
-```
-
-설치 후 `video`, `lpadmin` 그룹 권한이 적용되도록 한 번 재부팅하세요.
-
-```bash
+bash install.sh
 sudo reboot
 ```
 
-## 2. 기본 점검
+설치 스크립트가 OpenCV, pygame, CUPS, Gutenprint와 Python 가상환경을 준비하고 `.env`를 만듭니다. 재부팅한 뒤 **같은 사용자**로 로그인하세요.
 
-재부팅 후 Pi 데스크톱 터미널에서 실행합니다.
+## 4. MonoRouter와 마우스 설정
 
-```bash
-cd ~/photobooth
-./run.sh --test --window
-```
-
-카메라 없이 화면 흐름만 테스트합니다. 창이 뜨고 화면 클릭/터치 후 4컷 촬영 흐름이 진행되면 UI 기본 동작은 정상입니다.
-
-전체 환경 점검은 다음 명령으로 확인합니다.
-
-```bash
-source venv/bin/activate
-python3 doctor.py
-```
-
-## 3. 웹캠 설정
-
-웹캠을 USB에 연결한 뒤 장치 번호를 확인합니다.
-
-```bash
-v4l2-ctl --list-devices
-```
-
-예를 들어 `/dev/video0`가 실제 카메라라면 기본 설정 그대로 실행합니다.
-
-```bash
-./run.sh
-```
-
-다른 번호라면 실행 옵션이나 `.env`로 지정합니다.
-
-```bash
-./run.sh --camera-index 1
-```
-
-또는 `.env`:
-
-```bash
-PHOTOBOOTH_CAM_INDEX=1
-```
-
-장치 경로를 직접 고정할 수도 있습니다.
-
-```bash
-PHOTOBOOTH_CAM_DEVICE=/dev/video0
-```
-
-## 4. CP1500 프린터 설정
-
-CUPS를 켭니다.
-
-```bash
-sudo systemctl enable --now cups
-```
-
-CP1500을 USB로 연결하고 URI와 등록 가능한 드라이버를 확인합니다.
-
-```bash
-lpinfo -v
-lpinfo -m | grep -i cp1500
-```
-
-기존 `CP1500` 대기열이 동작하면 그대로 사용합니다. 새로 등록할 때는 CP1500용으로 표시된 실제 URI와 드라이버 ID를 사용하세요. 목록에 없으면 [CP1500을 지원하는 Gutenprint 릴리스](https://sourceforge.net/p/gimp-print/mailman/gimp-print-announce/thread/Z9HwZen6WtZ6waXx%40shaftnet.org/)를 확인하세요.
-
-```bash
-sudo lpadmin -p CP1500 \
-  -E \
-  -v 'lpinfo -v에 나온 CP1500 URI' \
-  -m 'lpinfo -m에 나온 CP1500 드라이버 ID'
-
-lpstat -p CP1500
-```
-
-이 프로그램의 기본 프린터 이름은 `CP1500`입니다. 이미 `lp -d CP1500 파일이름.jpg`로 출력에 성공했다면 프린터 등록은 끝난 상태입니다.
-
-기존 설치에서 `.env`에 예전 이름이 남아 있으면 아래처럼 바꿉니다.
+[MonoRouter 키 발급 안내](https://monogpt.kr/support/kr/articles/monorouter-api-key)에서 GPT Image 2.6을 사용할 수 있는 **Universal API 키**를 준비합니다. Pi 터미널에서 설정 파일을 엽니다.
 
 ```bash
 cd ~/photobooth
-sed -i 's/^PHOTOBOOTH_PRINTER_NAME=.*/PHOTOBOOTH_PRINTER_NAME=CP1500/' .env
-```
-
-수동 테스트:
-
-```bash
-lp -d CP1500 -o media=Postcard -o fit-to-page photos/테스트파일.jpg
-```
-
-## 5. 실제 실행
-
-```bash
-cd ~/photobooth
-./run.sh
-```
-
-자주 쓰는 옵션:
-
-```bash
-./run.sh --test                 # 카메라 없이 UI/촬영 흐름 테스트
-./run.sh --window               # 창 모드
-./run.sh --camera-index 1       # 카메라 번호 지정
-./run.sh --capture-orientation portrait  # 세로 촬영/저장
-./run.sh --capture-orientation landscape # 가로 촬영/저장
-./run.sh --portrait-rotation counterclockwise # 세로 방향이 반대일 때
-./run.sh --printer CP1500       # CUPS 프린터 이름 지정
-./run.sh --no-audio             # 오디오 장치 문제 시 무음 실행
-./run.sh --hide-cursor          # 터치 전용 부스에서 커서 숨김
-```
-
-기본 출력은 CP1500 RP-108 Postcard Size `100 x 148 mm` 기준 `1181 x 1748 px @ 300dpi`입니다. 한 파일에는 네 컷만 들어갑니다.
-
-`.env.example` 기본값은 가로 촬영 후 중앙 크롭(`PHOTOBOOTH_CAPTURE_ORIENTATION=landscape`)입니다. 시작 화면은 `오늘의 네컷` / `뚝딱이 창의공작소 포토부스` 큰 제목, 실제 출력에 들어가는 중앙 크롭 미리보기, `촬영 시작` 버튼만 보여줍니다. 촬영 후 리뷰 화면에서 촬영 방향, 프레임, 필터를 다시 고르면 최종 출력 파일이 자동으로 다시 합성됩니다. 세로 사진이 거꾸로 저장되면 `.env`에서 아래 값을 바꾸거나 실행 옵션을 사용하세요.
-
-라즈베리파이가 모니터를 `1024 x 768`로 인식해도 `PHOTOBOOTH_DISPLAY_AUTO_SIZE=1`이면 프로그램이 실제 화면 크기에 맞춰 UI를 다시 그립니다. 글자와 버튼이 작거나 흐리면 `.env`에서 이 값이 `1`인지 먼저 확인하세요.
-
-```bash
-PHOTOBOOTH_PORTRAIT_ROTATION=counterclockwise
-```
-
-기본 프레임/필터도 `.env`에서 바꿀 수 있습니다.
-
-```bash
-PHOTOBOOTH_BRAND_NAME="뚝딱이 창의공작소 포토부스"
-PHOTOBOOTH_EVENT_TITLE="오늘의 네컷"
-PHOTOBOOTH_BOOTH_SUBTITLE="뚝딱이 창의공작소 포토부스"
-PHOTOBOOTH_FOOTER_TEXT="뚝딱이 창의공작소 포토부스"
-PHOTOBOOTH_PRINT_BRAND_TEXT="뚝딱이 창의공작소"
-PHOTOBOOTH_PRINT_MARK_TEXT="FOUR CUT"
-PHOTOBOOTH_DOWNLOAD_PREFIX=photobooth
-PHOTOBOOTH_DEFAULT_FRAME_THEME=studio_black  # soft_pink/classic_white/studio_black/sky_blue
-PHOTOBOOTH_DEFAULT_FILTER=bright          # original/bright/warm/cool/mono
-PHOTOBOOTH_CAM_STALE_SECS=3
-PHOTOBOOTH_CAM_RECONNECT_SECS=2
-PHOTOBOOTH_CAM_MAX_READ_FAILURES=30
-PHOTOBOOTH_DEFAULT_PRINT_COPIES=1
-PHOTOBOOTH_MAX_PRINT_COPIES=10
-PHOTOBOOTH_REVIEW_TIMEOUT=120
-PHOTOBOOTH_PRINT_RESULT_TIMEOUT=5
-PHOTOBOOTH_PRINT_JOB_WAIT_SECS=120
-PHOTOBOOTH_PRINT_JOB_POLL_SECS=2
-PHOTOBOOTH_PHOTO_RETENTION_DAYS=14
-PHOTOBOOTH_MAX_STORED_PHOTOS=800
-PHOTOBOOTH_MIN_FREE_GB=1
-PHOTOBOOTH_CLEANUP_INTERVAL_SECS=3600
-```
-
-행사명이나 기관명을 바꾸려면 위 브랜딩 값을 수정하세요. 공백이 들어가는 값은 위 예시처럼 따옴표로 감싸는 것이 안전합니다. `PHOTOBOOTH_PRINT_BRAND_TEXT`는 인쇄물 하단 문구, `PHOTOBOOTH_DOWNLOAD_PREFIX`는 QR 다운로드 파일명 앞부분에 사용됩니다.
-
-시작 화면과 촬영 화면의 카메라 영상은 최종 네컷 합성에 실제로 들어갈 중앙 크롭만 보여줍니다. 화면에 보이지 않는 바깥 영역은 인쇄물에도 들어가지 않으므로 얼굴과 손동작은 보이는 화면 안쪽에 맞추세요.
-
-웹캠 프레임이 끊기면 프로그램은 자동 재연결을 시도하고, 새 프레임이 들어오기 전에는 촬영을 완료하지 않습니다. 행사 중 USB 허브나 전원 문제로 화면이 멈추는 경우 `운영 점검`에서 카메라 재연결 횟수를 확인하세요.
-
-출력 레이아웃은 `2x2`로 고정입니다. 시작 화면과 리뷰 화면에서 `auto`나 `4단`을 선택할 수 없고, RP-108 4x6 파일 하나에는 네 컷만 들어갑니다.
-
-리뷰 화면에서는 인쇄 매수를 `1~PHOTOBOOTH_MAX_PRINT_COPIES` 범위에서 바꿀 수 있습니다. 기본 최대값은 10장입니다. 손님이 리뷰 화면을 오래 방치하면 `PHOTOBOOTH_REVIEW_TIMEOUT`초 뒤 대기 화면으로 자동 복귀합니다. 시작 화면의 `운영 점검`에서는 카메라 프레임, CUPS 프린터 등록, QR 서버 주소, 저장공간을 확인할 수 있습니다.
-
-QR 코드는 JPG 파일을 바로 여는 대신 모바일 저장 페이지를 엽니다. 스마트폰에서 미리보기를 확인하고 `사진 다운로드` 버튼을 누르면 최종 네컷 JPG가 저장됩니다. 일부 iPhone/Android 브라우저에서 다운로드 버튼이 바로 저장되지 않으면 사진을 길게 눌러 저장하세요.
-
-운영 통계는 `booth_stats.json`에 저장됩니다. 시작 화면의 `운영 점검`에서 오늘 촬영 횟수, 인쇄 성공/실패, QR 다운로드 횟수와 전체 촬영 횟수를 확인할 수 있습니다.
-
-리뷰 화면의 촬영 컷 썸네일을 누르면 해당 컷이 선택됩니다. `선택 컷 다시 찍기`를 누르면 4장을 전부 다시 찍지 않고 선택한 컷만 새로 촬영한 뒤 최종 출력물을 다시 합성합니다. `전체 다시 찍기`는 현재 세션을 버리고 1번 컷부터 다시 시작합니다.
-
-프린터가 CUPS에 등록되어 있지 않거나 비활성 상태이면 인쇄 버튼을 눌러도 출력 화면으로 넘어가지 않고 리뷰 화면에 안내가 표시됩니다. 프린터 문제를 해결한 뒤 다시 `인쇄하기`를 누르세요.
-
-인쇄가 실패하면 사진 세션을 버리지 않고 리뷰 화면으로 돌아옵니다. 프린터를 다시 확인한 뒤 `인쇄하기`를 다시 누르거나, 손님에게 QR 다운로드를 제공할 수 있습니다. 인쇄 성공 시에는 결과 화면을 `PHOTOBOOTH_PRINT_RESULT_TIMEOUT`초 보여 준 뒤 대기 화면으로 돌아갑니다.
-
-인쇄 요청 후에는 CUPS 작업 ID를 추적해 `PHOTOBOOTH_PRINT_JOB_WAIT_SECS`초까지 대기열을 확인합니다. CP1500 출력이 오래 걸려 타임아웃이 나더라도 중복 출력 방지를 위해 요청은 성공으로 처리합니다. 프린터가 중간에 비활성화되거나 대기열을 받을 수 없는 상태가 되면 실패로 처리되어 리뷰 화면으로 돌아옵니다.
-
-`photos/` 폴더는 장기 운영 중 자동 정리됩니다. 기본값은 14일 초과 사진(및 `photos/ai/` 하위 폴더) 삭제, 최대 800장 보관, 저장공간 여유 1GB 미만이면 오래된 사진부터 삭제입니다. 행사가 끝난 뒤 원본을 보관해야 한다면 `photos/` 폴더를 먼저 백업하세요.
-
-## 6. AI 변신 네컷 설정 (선택)
-
-AI 변신 네컷은 촬영한 사진을 MonoRouter로 보내 GPT Image 2.6으로 편집한 뒤 인쇄합니다. 기본값은 꺼짐이고, 인터넷 연결이 필요합니다. 변환에 실패한 네컷은 원본 사진으로 대체합니다.
-
-1. [MonoRouter Universal API 키](https://monogpt.kr/support/kr/articles/monorouter-api-key)를 발급합니다. 키에 이미지 편집 모델 사용 권한을 부여하세요.
-2. `.env` 설정 (`.env`는 커밋하지 마세요):
-
-```bash
-cd ~/photobooth
-chmod 600 .env
 nano .env
 ```
 
-```bash
+아래 항목을 찾아 값을 바꾸고, `발급받은_키`에는 본인의 키를 입력하세요. Nano에서 `Ctrl+O` → `Enter`로 저장하고 `Ctrl+X`로 나옵니다.
+
+```dotenv
 PHOTOBOOTH_AI_ENABLED=1
 PHOTOBOOTH_AI_PROVIDER=monorouter
-PHOTOBOOTH_AI_MONOROUTER_API_KEY=발급받은키
+PHOTOBOOTH_AI_MODEL=gpt-image-2.6
+PHOTOBOOTH_AI_MONOROUTER_API_KEY=발급받은_키
+PHOTOBOOTH_FULLSCREEN=1
+PHOTOBOOTH_MOUSE_VISIBLE=1
+PHOTOBOOTH_PRINTER_NAME=CP1500
 ```
 
-값 뒤에 `# 주석`을 붙이지 마세요. 나머지 `PHOTOBOOTH_AI_*` 값(시간 제한, 재변환 횟수, 동의 문구 등)은 `.env.example`의 기본값을 그대로 써도 됩니다.
+API 키는 Pi의 `.env`에 보관하세요. 프로그램은 인터넷을 통해 MonoRouter에 합성을 요청합니다. Wi-Fi와 남은 크레딧이 있어야 두 촬영 모드를 사용할 수 있습니다.
 
-3. 점검:
+## 5. CP1500을 USB 프린터로 등록
+
+프린터 전원을 켜고 케이블과 용지를 확인한 뒤 아래 명령을 실행합니다. `lpstat -v CP1500`에 `usb://Canon/SELPHY...`가 나오고 기존 대기열로 출력이 된다면 등록을 건너뛰세요.
 
 ```bash
-source venv/bin/activate
-python3 doctor.py            # AI 설정, 콘셉트, MonoRouter 인증 확인
-python3 doctor.py --ai-live  # 실제 변환 1장 테스트 (비용 발생, 결과는 poc_out/doctor_ai_live.jpg)
+sudo systemctl enable --now cups
+lpstat -v CP1500
+sudo /usr/sbin/lpinfo -v | grep -i selphy
+sudo /usr/sbin/lpinfo -m | grep -Ei 'cp1500|cp1300'
 ```
 
-4. 화면 확인:
+새로 등록할 때는 출력된 **USB 장치 주소**와 **드라이버 ID**를 사용합니다. 아래 명령은 CP1500 전용 드라이버를 먼저 찾고, Bookworm에서 실제 사용 중인 CP1300 호환 드라이버로 대체합니다. 연결된 CP1500 한 대를 기준으로 합니다.
 
 ```bash
-./run.sh --test --window --ai-mock   # API 없이 AI 화면 흐름만 테스트
-./run.sh --window                    # 실제 API 사용
-./run.sh --no-ai                     # 오늘은 AI 없이 일반 네컷만
+(
+  set -e
+  URI=$(sudo /usr/sbin/lpinfo -v | awk 'tolower($2) ~ /^usb:\/\/canon\/selphy.*cp1500/ {print $2; exit}')
+  DRIVERS=$(sudo /usr/sbin/lpinfo -m)
+  DRIVER=$(printf '%s\n' "$DRIVERS" | awk 'tolower($0) ~ /canon selphy cp1500/ {print $1; exit}')
+  if [ -z "$DRIVER" ]; then
+    DRIVER=$(printf '%s\n' "$DRIVERS" | awk 'tolower($0) ~ /canon selphy cp1300/ {print $1; exit}')
+  fi
+  if [ -z "$URI" ] || [ -z "$DRIVER" ]; then
+    echo "CP1500 USB 주소 또는 Gutenprint 드라이버를 찾지 못했습니다."
+    exit 1
+  fi
+  sudo /usr/sbin/lpadmin -p CP1500 -E -v "$URI" -m "$DRIVER"
+  lpstat -v CP1500
+  lpstat -p CP1500
+)
 ```
 
-AI가 켜져 있으면 시작 화면에서 일반 네컷, AI 변신 네컷, AI 증명사진을 선택할 수 있습니다. 프로그램은 60초마다 AI 서버 연결을 확인합니다(이미지 생성 없음, 비용 없음). 연결이 끊겼을 때는 일반 네컷으로 촬영할 수 있습니다. `운영 점검` 화면의 `AI` 행에서 Provider, 모델, 키 설정 여부, 마지막 연결 확인 결과, 오늘 AI 성공/실패 수를 볼 수 있습니다.
+`lpstat`에서 `CP1500` 대기열이 보이면 다음 단계로 진행합니다. 드라이버를 못 찾을 때는 `sudo apt install printer-driver-gutenprint`를 실행하고 프린터를 다시 켠 뒤 확인하세요.
 
-비용과 시간은 MonoRouter 사용 내역과 실제 변환에 걸린 시간으로 확인하세요. 인증 점검은 모델의 편집 권한과 크레딧 소진 여부까지 보장하지 않으므로 행사 전에 `doctor.py --ai-live`로 한 장을 확인합니다.
+## 6. 카메라와 실행 점검
 
-개인정보: 손님은 `동의하고 촬영`을 눌러야 AI 촬영을 시작합니다. 어린이 대상 행사라면 보호자 동의 방식을 주최 측과 미리 정하세요. 증명사진은 최근 사진 선택을 위해 편집된 개별 컷과 인화지를 `photos/`에 저장하고, 기존 사진 보관 설정에 따라 정리합니다. 인쇄 전에 선택한 사진의 참가자와 공유 여부를 확인하세요. AI 네컷 인쇄물 하단에는 `AI 생성 이미지`가 표시됩니다.
+```bash
+cd ~/photobooth
+v4l2-ctl --list-devices
+venv/bin/python doctor.py
+```
 
-### 박람회용 AI 증명사진
+점검 결과에서 카메라 프레임 읽기, `CP1500` 대기열, QR 포트, 저장 공간, MonoRouter 인증이 정상인지 확인합니다. 웹캠이 여러 개라면 목록에서 사용할 장치를 골라 `.env`의 `PHOTOBOOTH_CAM_DEVICE=/dev/video0` 값을 실제 장치로 설정합니다.
 
-한 사람이 화면 중앙에서 카메라를 정면으로 보도록 안내합니다. 여러 명을 선택했을 때는 참가자마다 동의하고 한 사람씩 촬영합니다. 얼굴 검출이나 AI 변환이 실패한 경우 해당 참가자의 컷을 다시 촬영할 수 있습니다.
+```bash
+./run.sh --test --window --ai-mock --no-audio  # 예시 카메라와 모의 AI로 화면 확인
+./run.sh                                     # 테스트 창을 닫은 뒤 실제 운영 앱 실행
+```
 
-프린터는 RP-108과 Postcard 용지를 사용합니다. AI 증명사진은 가로 34mm × 세로 49mm 규격으로 배치하고, CUPS에는 여백에 맞추는 확대·축소 없이 300dpi PDF로 보냅니다. 행사 전 실물에서 가로·세로 치수를 측정해 드라이버의 출력 배율을 확인하세요.
+첫 줄 실행 후 `Esc`로 테스트 창을 닫고 둘째 줄을 실행합니다. 실제 운영 앱에서는 다음을 한 번씩 확인하세요.
 
-## 7. 기존 Pi에서 프로그램 업데이트
+- **AI 변신 네컷** · 복장 선택 → 네 컷 촬영 → 미리보기 → CP1500에서 종이 한 장 출력.
+- **키링용 AI 증명사진** · 한 명 촬영 → 사진 칸 선택 → 한 장 출력. 재단 표시 사이가 **34 × 49 mm**인지 자로 측정합니다.
+- **QR 저장** · 휴대폰을 같은 로컬 Wi-Fi에 연결하고 QR을 스캔해 JPG 다운로드를 확인합니다.
 
-이미 `~/photobooth`에 설치해 둔 상태라면 실행 중인 포토부스를 닫고 업데이트합니다. `git status --short`에 파일 변경이 표시되면 내용을 먼저 확인하세요.
+RP-108 엽서 기준 출력물은 절취 후 **100 × 148 mm**입니다. 키링 모드는 배율을 유지하기 위해 300dpi PDF로 CUPS에 전송합니다. CUPS에서 접수됐다는 표시가 나오면 프린터에서 종이가 실제로 나왔는지도 확인하세요.
+
+## 7. 바탕화면 바로가기 만들기
+
+동일한 Pi 사용자로 아래 명령을 한 번 실행합니다. 그 뒤 바탕화면의 **포토부스 실행** 아이콘을 열면 됩니다. 데스크톱에서 실행 확인을 묻는 경우 **실행**을 누르세요. 아래 `flock` 설정은 바로가기를 여러 번 눌러도 중복 실행을 막습니다.
+
+```bash
+DESKTOP_DIR="$(xdg-user-dir DESKTOP)"
+mkdir -p "$DESKTOP_DIR" "$HOME/.local/state/photobooth"
+
+cat > "$DESKTOP_DIR/포토부스 실행.desktop" <<EOF_DESKTOP
+[Desktop Entry]
+Type=Application
+Name=포토부스 실행
+Comment=뚝딱이 창의공작소 포토부스
+Exec=/usr/bin/flock -n "$HOME/.local/state/photobooth/run.lock" "$HOME/photobooth/run.sh"
+Path=$HOME/photobooth
+Icon=camera-photo
+Terminal=false
+EOF_DESKTOP
+
+chmod +x "$DESKTOP_DIR/포토부스 실행.desktop"
+```
+
+매번 클릭해서 시작하려면 여기까지면 됩니다. 전체화면 앱은 `Esc`로 닫을 수 있습니다. 마우스만으로 창을 닫는 운영이 필요하면 바로가기의 `Exec=` 줄 끝에 `--window`를 붙이세요. 데스크톱의 시스템 종료는 촬영과 인쇄가 모두 끝난 뒤 사용하세요. Pi 데스크톱 로그인과 함께 앱을 띄우려면 아래를 실행합니다.
+
+```bash
+mkdir -p ~/.config/autostart
+cp "$(xdg-user-dir DESKTOP)/포토부스 실행.desktop" ~/.config/autostart/photobooth.desktop
+```
+
+자동 실행을 등록했다면 한 번 재로그인해 카메라 미리보기까지 뜨는지 확인합니다.
+
+## 현장에 맞게 조정하기
+
+| 조정할 항목 | 설정 |
+| --- | --- |
+| 행사명과 부스명 | `.env`의 `PHOTOBOOTH_EVENT_TITLE`, `PHOTOBOOTH_BOOTH_SUBTITLE`을 수정합니다. 공백이 들어간 값은 큰따옴표로 감쌉니다. |
+| 웹캠 방향 | `PHOTOBOOTH_CAPTURE_ORIENTATION`을 `landscape` 또는 `portrait`로 설정합니다. 세로가 거꾸로 보이면 `PHOTOBOOTH_PORTRAIT_ROTATION`을 `clockwise` 또는 `counterclockwise`로 바꿉니다. |
+| 사진 보관 | 인화 파일과 키링 선택용 사진은 `photos/`에 저장됩니다. `PHOTOBOOTH_PHOTO_RETENTION_DAYS`, `PHOTOBOOTH_MAX_STORED_PHOTOS`, `PHOTOBOOTH_MIN_FREE_GB`로 정리 기준을 정합니다. |
+| AI 이미지 생성 점검 | `venv/bin/python doctor.py --ai-live`는 실제 변환 한 장을 요청하며 크레딧을 사용합니다. |
+
+설정을 저장한 뒤 앱을 다시 실행합니다. 전체 항목은 [설정 예시](.env.example)를 참고하세요.
+
+## 문제 해결
+
+| 증상 | 확인할 것 |
+| --- | --- |
+| 시작 화면에서 AI 버튼이 회색 | `venv/bin/python doctor.py`로 인터넷, 모델 ID, 키 인증을 확인하고 MonoRouter에서 남은 크레딧을 확인합니다. |
+| 카메라가 안 보임 | 케이블을 다시 연결하고 `v4l2-ctl --list-devices`로 장치 번호를 확인합니다. 웹캠을 사용하는 다른 앱이 있으면 종료합니다. |
+| 프린터가 연결됐는데 출력되지 않음 | 프린터 자체 전원, USB 데이터 케이블, 용지·잉크를 확인합니다. `lpstat -v CP1500`, `lpstat -p CP1500`, `lpstat -o CP1500`으로 주소, 활성 상태, 작업을 확인합니다. |
+| 키링 크기가 다름 | 키링 모드에서 출력했는지, RP-108을 사용했는지 확인하고 재단선 사이를 다시 측정합니다. |
+| QR 페이지가 열리지 않음 | 휴대폰이 Pi와 같은 로컬 Wi-Fi에 있고, 게스트망의 기기 간 통신 차단이 없는지 확인합니다. QR의 기본 접속 포트는 `8080`입니다. |
+| 화면이 늦거나 장시간 사용 후 느려짐 | `vcgencmd measure_temp`와 `vcgencmd get_throttled`로 온도를 확인하고 케이스 통풍을 점검합니다. |
+| 원인을 확인하고 싶음 | `cd ~/photobooth && tail -n 80 photobooth.log`를 실행합니다. 시작 화면의 **운영 점검**에서도 상태를 볼 수 있습니다. |
+
+## 업데이트
+
+촬영과 인쇄가 끝난 뒤 앱을 닫고 업데이트하세요. 현장에서 수정한 소스 파일이 있으면 `git status --short`로 확인하고 먼저 백업하세요.
 
 ```bash
 cd ~/photobooth
 git status --short
-git pull --ff-only origin main
-bash install.sh
-git log --oneline -1
+git pull --ff-only
+./run.sh
 ```
 
-`./install.sh`는 기존 `.env` 값을 덮어쓰지 않고, 새 버전에서 추가된 `PHOTOBOOTH_...` 설정만 `.env` 끝에 붙입니다. 실행 전 `.env.backup.날짜` 파일도 남기므로 현장 설정을 되돌릴 수 있습니다.
-
-`git pull`에서 다른 파일 충돌이 나오면 그 파일도 로컬에서 바뀐 상태입니다. 직접 고친 내용이 아니라면 아래처럼 전체 백업 후 다시 받습니다.
-
-```bash
-git stash push -m "backup pi local changes"
-git pull origin main
-```
-
-업데이트 후 세로 방향 테스트:
-
-```bash
-./run.sh --window --no-audio --capture-orientation portrait --portrait-rotation counterclockwise
-```
-
-방향이 반대이면 `counterclockwise`를 `clockwise`로 바꿔 실행합니다.
-
-## 8. 부팅 자동 실행
-
-`Exec` 경로는 실제 저장소 위치에 맞추세요.
-
-```bash
-mkdir -p ~/.config/autostart
-nano ~/.config/autostart/photobooth.desktop
-```
-
-내용:
-
-```ini
-[Desktop Entry]
-Type=Application
-Name=Ddukddak Photobooth
-Exec=/home/pi/photobooth/run.sh
-Terminal=false
-X-GNOME-Autostart-enabled=true
-```
-
-저장 후 재부팅합니다.
-
-```bash
-sudo reboot
-```
-
-## 9. 운영 주의사항
-
-- Pi 5는 정품 5V 5A 전원과 방열판/쿨러를 권장합니다. 전원 부족이면 웹캠, 프린터, USB가 불안정해질 수 있습니다.
-- CP1500은 USB 연결이 가장 단순합니다. Wi-Fi 프린팅은 네트워크 상태에 따라 지연/실패 원인이 늘어납니다.
-- QR 다운로드는 Pi와 스마트폰이 같은 Wi-Fi에 있어야 합니다. 행사장 공유기에서 기기 간 통신 차단(AP isolation)이 켜져 있으면 QR 접속이 실패합니다.
-- 최신 Raspberry Pi OS는 Wayland 기반입니다. 이 프로그램은 `SDL_VIDEODRIVER`를 강제하지 않고 자동 선택하게 두었습니다. 화면이 뜨지 않을 때만 `.env`에 `PHOTOBOOTH_SDL_VIDEODRIVER=x11` 또는 `wayland`를 지정해 테스트하세요.
-- 오디오 장치가 없어도 앱은 무음으로 실행됩니다. 문제가 계속되면 `.env`에 `PHOTOBOOTH_AUDIO_ENABLED=0`을 넣으세요.
-- 자동 정리는 오래된 `photos/*.jpg`와 `photos/ai/` 하위 폴더만 삭제합니다. 장기 보관이 필요한 사진은 행사 후 별도 저장장치로 옮기세요.
-
-## 10. 문제 해결 명령
-
-```bash
-tail -f photobooth.log
-v4l2-ctl --list-devices
-lpstat -p
-lpinfo -v
-hostname -I
-ss -tlnp | grep 8080
-```
+기존 `.env`와 `photos/`는 Pi에 보관됩니다. 새 Pi로 옮길 때는 MonoRouter 키를 발급하거나 기존 키를 안전하게 옮기고, 유지해야 할 촬영 파일이 있다면 별도로 백업하세요.
