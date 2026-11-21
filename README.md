@@ -1,10 +1,10 @@
 # 뚝딱 포토부스
 
+![복장 네 가지를 담은 네컷 인화물과 아크릴 사진 키링을 연출한 소개 이미지](docs/images/photobooth-cover.webp)
+
 시립중랑청소년센터 **뚝딱이 창의공작소**의 행사 포토부스입니다. Raspberry Pi 5에서 마우스로 복장을 고르고 촬영한 뒤, Canon SELPHY CP1500으로 출력할 수 있습니다. 설치를 마치면 라즈베리파이에서 독립적으로 운영합니다.
 
 [라즈베리파이 설치 순서](RASPBERRY_PI5_SETUP.md) · [단계별 화면 안내](docs/SCREEN_GUIDE.md) · [문제 해결](RASPBERRY_PI5_SETUP.md#문제-해결)
-
-![포토부스 시작 화면. 왼쪽 AI 변신 네컷과 오른쪽 키링용 AI 증명사진](docs/screenshots/01-home.webp)
 
 ## 두 가지 촬영 모드
 
