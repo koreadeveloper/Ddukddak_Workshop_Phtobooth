@@ -5,12 +5,12 @@ SELPHY CP1500 RP-108 엽서(100x148mm / 4x6 / 4R @ 300dpi) 기준:
 """
 from PIL import Image, ImageDraw, ImageFont
 from pathlib import Path
-from datetime import datetime
+from datetime import date, datetime
 import cv2
 import numpy as np
 import logging
 
-from config import PHOTOS_DIR, FONT_CANDIDATES, PRINT_BRAND_TEXT, PRINT_MARK_TEXT
+from config import ASSETS_DIR, PHOTOS_DIR, FONT_CANDIDATES, PRINT_BRAND_TEXT, PRINT_MARK_TEXT
 
 log = logging.getLogger(__name__)
 
@@ -53,13 +53,10 @@ FRAME_THEMES = {
     },
 }
 
-AI_DISCLOSURE_TEXT = "AI 생성 이미지"
-
-PRINT_LAYOUTS = {
-    "auto": "자동",
-    "grid": "2x2",
-    "stacked": "4단",
-}
+PRINT_LOGOS = (
+    (ASSETS_DIR / "branding" / "jungnang-youth-center.jpg", 45),
+    (ASSETS_DIR / "branding" / "ddukddak-workshop.png", 68),
+)
 
 
 def get_frame_theme(theme_id: str | None) -> dict:
@@ -155,19 +152,15 @@ def _make_sheet(
     photos: list,
     frame_theme_id: str | None = None,
     layout_id: str | None = None,
-    label_text: str | None = None,
-    ai_disclosure: bool = False,
+    *,
+    capture_date: date | None = None,
 ) -> Image.Image:
-    """4장 BGR ndarray → RP-108 한 장짜리 네컷 PIL Image
-
-    label_text: AI 콘셉트 라벨 (있으면 하단 문구를 '브랜드 · 라벨 · 날짜'로 바꿈)
-    ai_disclosure: True면 하단 구석에 'AI 생성 이미지' 작게 표기
-    """
+    """4장 BGR ndarray → RP-108 한 장짜리 네컷 PIL Image."""
     if len(photos) != 4:
         raise ValueError(f"compose requires exactly 4 photos, got {len(photos)}")
     theme = get_frame_theme(frame_theme_id)
     is_landscape = _photos_are_landscape(photos)
-    layout, slot_w, slot_h, coords = _slot_layout(is_landscape, layout_id)
+    _, slot_w, slot_h, coords = _slot_layout(is_landscape, layout_id)
     footer = 92
 
     canvas = Image.new("RGB", (PRINT_W, PRINT_H), theme["bg"])
@@ -184,17 +177,37 @@ def _make_sheet(
         )
         canvas.paste(img, (x, y))
 
-    # 하단 브랜드 텍스트
-    font  = _pil_font(28)
-    today = datetime.now().strftime("%Y.%m.%d")
-    if label_text:
-        label = f"{PRINT_BRAND_TEXT}  ·  {label_text}  ·  {today}"
+    # 흰 바탕의 공식 로고와 촬영일을 인화물 하단에 함께 배치합니다.
+    font = _pil_font(30)
+    formatted_date = (capture_date or datetime.now().date()).strftime("%Y.%m.%d")
+    center_y = PRINT_H - footer // 2
+    logos = []
+    for path, logo_height in PRINT_LOGOS:
+        if path.is_file():
+            with Image.open(path) as source:
+                width = round(source.width * logo_height / source.height)
+                logos.append(source.convert("RGBA").resize((width, logo_height), Image.LANCZOS))
+    if logos:
+        logo_gap = 16
+        date_width = draw.textlength(formatted_date, font=font)
+        badge_width = sum(logo.width for logo in logos) + logo_gap * (len(logos) - 1) + 24
+        badge_height = max(logo.height for logo in logos) + 12
+        badge_x = round((PRINT_W - badge_width - 22 - date_width) / 2)
+        badge_y = center_y - badge_height // 2
+        draw.rounded_rectangle(
+            (badge_x, badge_y, badge_x + badge_width, badge_y + badge_height),
+            radius=10,
+            fill="white",
+        )
+        logo_x = badge_x + 12
+        for logo in logos:
+            canvas.paste(logo, (logo_x, center_y - logo.height // 2), logo)
+            logo_x += logo.width + logo_gap
+        draw.text((badge_x + badge_width + 22, center_y), formatted_date,
+                  fill=theme["text"], font=font, anchor="lm")
     else:
-        label = f"{PRINT_BRAND_TEXT}  ·  {theme['name']}  ·  {PRINT_LAYOUTS[layout]}  ·  {today}"
-    bbox  = draw.textbbox((0, 0), label, font=font)
-    tx = (PRINT_W - (bbox[2] - bbox[0])) // 2
-    ty = PRINT_H - footer + 26
-    draw.text((tx, ty), label, fill=theme["text"], font=font)
+        draw.text((PRINT_W // 2, center_y), f"{PRINT_BRAND_TEXT}   {formatted_date}",
+                  fill=theme["text"], font=font, anchor="mm")
 
     mark_font = _pil_font(18)
     mark = PRINT_MARK_TEXT
@@ -205,17 +218,6 @@ def _make_sheet(
         fill=theme["accent"],
         font=mark_font,
     )
-
-    if ai_disclosure:
-        note_font = _pil_font(18)
-        note = AI_DISCLOSURE_TEXT
-        note_bbox = draw.textbbox((0, 0), note, font=note_font)
-        draw.text(
-            (PRINT_W - (note_bbox[2] - note_bbox[0]) - 44, PRINT_H - 34),
-            note,
-            fill=theme["text"],
-            font=note_font,
-        )
 
     return canvas
 
@@ -252,11 +254,11 @@ def compose_print_image(
     session_id: str,
     frame_theme_id: str | None = None,
     layout_id: str | None = None,
-    label_text: str | None = None,
-    ai_disclosure: bool = False,
+    *,
+    capture_date: date | None = None,
 ) -> Path:
     """RP-108 한 장에 네 컷만 배치해 JPEG 저장 후 경로 반환"""
-    sheet = _make_sheet(photos, frame_theme_id, layout_id, label_text, ai_disclosure)
+    sheet = _make_sheet(photos, frame_theme_id, layout_id, capture_date=capture_date)
     PHOTOS_DIR.mkdir(parents=True, exist_ok=True)
     out = PHOTOS_DIR / f"{session_id}.jpg"
     sheet.save(out, "JPEG", quality=95, dpi=(PRINT_DPI, PRINT_DPI))
@@ -269,11 +271,11 @@ def make_preview_image(
     target_h: int = 820,
     frame_theme_id: str | None = None,
     layout_id: str | None = None,
-    label_text: str | None = None,
-    ai_disclosure: bool = False,
+    *,
+    capture_date: date | None = None,
 ) -> Image.Image:
     """화면 표시용 미리보기 PIL Image (RP-108 시트, 세로 target_h 기준)"""
-    sheet = _make_sheet(photos, frame_theme_id, layout_id, label_text, ai_disclosure)
+    sheet = _make_sheet(photos, frame_theme_id, layout_id, capture_date=capture_date)
     target_w = int(sheet.width * target_h / sheet.height)
     return sheet.resize((target_w, target_h), Image.LANCZOS)
 

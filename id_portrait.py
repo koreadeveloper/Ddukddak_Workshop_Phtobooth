@@ -18,9 +18,12 @@ PORTRAIT_PROMPT_SUFFIX = (
     "a plain light gray studio backdrop. Keep the one person's original head "
     "position, size and angle and the exact locations of their eyes, nose and mouth. "
     "Keep their appearance and expression. Change only the clothing, requested "
-    "accessories and background. Keep the chosen outfit visible, use soft even "
-    "front lighting that evenly illuminates the entire face, no shadows from hats, "
-    "and leave comfortable margins around the head. "
+    "accessories and background. Use soft studio lighting shared by the subject "
+    "and backdrop, with consistent exposure and white balance. Preserve the "
+    "original complexion and skin texture with gentle highlights and natural "
+    "shadows. Keep the eyes clear under hats and retain detail in light clothing "
+    "without skin whitening, blown highlights or bright outlines. Leave "
+    "comfortable margins around the head. "
     "No text, markings, logos, simulated ID documents or other people."
 )
 
